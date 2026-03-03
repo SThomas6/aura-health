@@ -3,13 +3,10 @@
 
 Student ID: `C24053582`
 
+Aura Health is a preventative healthcare journaling application that tracks symptoms, correlating them with real-time environmental data. Users can generate AI-powered analysis to identify patterns and potential correlations with a notification if something concerning is found. Functionality includes a symptom logger with predefined and custom entry along with device location services to fetch live environmental metrics including air quality and weather conditions via an external API. Users can also export health reports as PDFs which can be sent to their doctor as context for their appointments. 
 
-Aura Health is a preventative healthcare journaling application that tracks symptoms and daily habits, correlating them with real time environmental data to generate actionable tasks to improve the user’s health. Functionality includes a symptom logger, nutritional tracker, device location services to fetch live environmental metrics including air quality and weather conditions via an external API. Users can also export health reports as pdf’s which can be sent to their doctor as context for their appointments. Additionally, AI analysis of the data will be scheduled daily, with a notification telling them if they should see a doctor or not.
+People with environmentally sensitive conditions currently have no way to connect symptoms with environmental triggers without manually cross-referencing environmental data about the air and weather. For example, many people experience fatigue, joint pain and breathing issues from changes in pollution, barometric pressure and humidity, and yet struggle to identify these subtle correlations. Aura Health does the complex analysis without needing additional health devices. 
 
-The motivation for this app comes from the overlooked positive impact of proactive healthcare on an individual’s long term health. For example, many people experience fatigue, joint pain and breathing issues from changes in pollution, barometric pressure and diet, and yet struggle to identify these subtle correlations. Aura Health automates this complex analysis without needing extra smart devices. 
-
-This is ideal for those focused on a long term approach to healthcare as well as those managing environmentally sensitive health conditions. By automating the gap between personal health logging, external environment data and analysis, Aura Health empowers users to make informed lifestyle adjustments. 
-
-
+The app is ideal for those focused on a pre-emptive approach to healthcare as well as those who have environmentally sensitive health conditions. By bridging the gap between symptom logs, external environmental data and AI analysis, users can make informed lifestyle changes and bring empirically grounded context to medical appointments
 
 
