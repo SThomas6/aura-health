@@ -1,0 +1,62 @@
+package com.example.mob_dev_portfolio.ui.log
+
+data class LogDraft(
+    val symptomName: String = "",
+    val description: String = "",
+    val startEpochMillis: Long = System.currentTimeMillis(),
+    val hasEnded: Boolean = false,
+    val endEpochMillis: Long? = null,
+    val severity: Int = 5,
+    val medication: String = "",
+    val contextTags: Set<String> = emptySet(),
+    val notes: String = "",
+)
+
+enum class LogField { SymptomName, Description, StartDateTime, EndDateTime, Severity }
+
+data class LogValidationResult(
+    val errors: Map<LogField, String>,
+) {
+    val isValid: Boolean get() = errors.isEmpty()
+
+    fun summary(): String = errors.values.joinToString(separator = "\n") { "• $it" }
+}
+
+object LogValidator {
+
+    const val MIN_SEVERITY = 1
+    const val MAX_SEVERITY = 10
+    const val MAX_FUTURE_SKEW_MILLIS: Long = 60_000L
+
+    fun validate(
+        draft: LogDraft,
+        now: Long = System.currentTimeMillis(),
+    ): LogValidationResult {
+        val errors = mutableMapOf<LogField, String>()
+
+        if (draft.symptomName.isBlank()) {
+            errors[LogField.SymptomName] = "Symptom type is required"
+        }
+        if (draft.description.isBlank()) {
+            errors[LogField.Description] = "Description is required"
+        }
+        if (draft.startEpochMillis <= 0L) {
+            errors[LogField.StartDateTime] = "Start date/time is required"
+        } else if (draft.startEpochMillis > now + MAX_FUTURE_SKEW_MILLIS) {
+            errors[LogField.StartDateTime] = "Start date/time cannot be in the future"
+        }
+        if (draft.hasEnded) {
+            val end = draft.endEpochMillis
+            when {
+                end == null -> errors[LogField.EndDateTime] = "End date/time is required when the symptom has ended"
+                end < draft.startEpochMillis -> errors[LogField.EndDateTime] = "End date/time must be after the start"
+                end > now + MAX_FUTURE_SKEW_MILLIS -> errors[LogField.EndDateTime] = "End date/time cannot be in the future"
+            }
+        }
+        if (draft.severity !in MIN_SEVERITY..MAX_SEVERITY) {
+            errors[LogField.Severity] = "Severity must be between $MIN_SEVERITY and $MAX_SEVERITY"
+        }
+
+        return LogValidationResult(errors)
+    }
+}

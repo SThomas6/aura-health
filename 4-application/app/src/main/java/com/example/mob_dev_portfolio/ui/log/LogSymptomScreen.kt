@@ -1,0 +1,553 @@
+package com.example.mob_dev_portfolio.ui.log
+
+import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.ExperimentalLayoutApi
+import androidx.compose.foundation.layout.FlowRow
+import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.heightIn
+import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.sizeIn
+import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.verticalScroll
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.filled.ArrowBack
+import androidx.compose.material.icons.filled.CalendarMonth
+import androidx.compose.material.icons.filled.Check
+import androidx.compose.material.icons.filled.ErrorOutline
+import androidx.compose.material.icons.filled.Schedule
+import androidx.compose.material3.Button
+import androidx.compose.material3.Card
+import androidx.compose.material3.CardDefaults
+import androidx.compose.material3.DatePicker
+import androidx.compose.material3.DatePickerDialog
+import androidx.compose.material3.DropdownMenuItem
+import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material3.ExposedDropdownMenuBox
+import androidx.compose.material3.ExposedDropdownMenuBoxScope
+import androidx.compose.material3.ExposedDropdownMenuDefaults
+import androidx.compose.material3.MenuAnchorType
+import androidx.compose.material3.FilterChip
+import androidx.compose.material3.FilterChipDefaults
+import androidx.compose.material3.HorizontalDivider
+import androidx.compose.material3.Icon
+import androidx.compose.material3.IconButton
+import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.OutlinedTextField
+import androidx.compose.material3.Scaffold
+import androidx.compose.material3.Slider
+import androidx.compose.material3.SnackbarHost
+import androidx.compose.material3.SnackbarHostState
+import androidx.compose.material3.Surface
+import androidx.compose.material3.Switch
+import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
+import androidx.compose.material3.TimePicker
+import androidx.compose.material3.TopAppBar
+import androidx.compose.material3.rememberDatePickerState
+import androidx.compose.material3.rememberTimePickerState
+import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
+import androidx.compose.ui.Alignment
+import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.testTag
+import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.unit.dp
+import androidx.compose.ui.window.Dialog
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import androidx.lifecycle.viewmodel.compose.viewModel
+import com.example.mob_dev_portfolio.data.ContextTagCatalog
+import com.example.mob_dev_portfolio.data.SymptomCatalog
+import java.time.Instant
+import java.time.LocalDate
+import java.time.LocalDateTime
+import java.time.LocalTime
+import java.time.ZoneId
+import java.time.format.DateTimeFormatter
+
+private val DateFormatter: DateTimeFormatter = DateTimeFormatter.ofPattern("EEE, d MMM yyyy")
+private val TimeFormatter: DateTimeFormatter = DateTimeFormatter.ofPattern("HH:mm")
+
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+fun LogSymptomScreen(
+    onBack: () -> Unit,
+    onSaved: () -> Unit,
+    viewModel: LogSymptomViewModel = viewModel(factory = LogSymptomViewModel.Factory),
+) {
+    val uiState by viewModel.state.collectAsStateWithLifecycle()
+    val snackbarHost = remember { SnackbarHostState() }
+
+    LaunchedEffect(uiState.savedConfirmation) {
+        uiState.savedConfirmation?.let {
+            snackbarHost.showSnackbar(it)
+            viewModel.onConfirmationShown()
+        }
+    }
+
+    Scaffold(
+        topBar = {
+            TopAppBar(
+                title = { Text("Log a symptom") },
+                navigationIcon = {
+                    IconButton(onClick = onBack, modifier = Modifier.sizeIn(minWidth = 48.dp, minHeight = 48.dp)) {
+                        Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Back")
+                    }
+                },
+            )
+        },
+        snackbarHost = { SnackbarHost(snackbarHost) },
+    ) { padding ->
+        Column(
+            modifier = Modifier
+                .padding(padding)
+                .fillMaxWidth()
+                .verticalScroll(rememberScrollState())
+                .padding(horizontal = 20.dp, vertical = 12.dp),
+            verticalArrangement = Arrangement.spacedBy(20.dp),
+        ) {
+            if (uiState.showErrorBanner && uiState.errors.isNotEmpty()) {
+                ErrorBanner(
+                    errors = uiState.errors.values.toList(),
+                    onDismiss = viewModel::onErrorBannerDismissed,
+                )
+            }
+
+            SectionHeader("Symptom", "What did you experience?")
+            SymptomPicker(
+                value = uiState.draft.symptomName,
+                onValueChange = viewModel::onSymptomNameChange,
+                isError = uiState.errors.containsKey(LogField.SymptomName),
+                errorText = uiState.errors[LogField.SymptomName],
+            )
+
+            OutlinedTextField(
+                value = uiState.draft.description,
+                onValueChange = viewModel::onDescriptionChange,
+                label = { Text("Description") },
+                placeholder = { Text("Briefly describe what you're feeling") },
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .heightIn(min = 96.dp)
+                    .testTag("field_description"),
+                minLines = 3,
+                isError = uiState.errors.containsKey(LogField.Description),
+                supportingText = uiState.errors[LogField.Description]?.let { { Text(it) } },
+            )
+
+            HorizontalDivider()
+
+            SectionHeader("When did it start?", "Defaults to now; tap to edit.")
+            DateTimeRow(
+                epochMillis = uiState.draft.startEpochMillis,
+                onPick = viewModel::onStartDateTimeChange,
+                errorText = uiState.errors[LogField.StartDateTime],
+                testTagPrefix = "start",
+            )
+
+            Row(
+                modifier = Modifier.fillMaxWidth().padding(top = 4.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Column(modifier = Modifier.weight(1f)) {
+                    Text("Symptom has ended", style = MaterialTheme.typography.titleMedium)
+                    Text(
+                        "Record when it stopped",
+                        style = MaterialTheme.typography.bodyMedium,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                }
+                Switch(
+                    checked = uiState.draft.hasEnded,
+                    onCheckedChange = viewModel::onHasEndedChange,
+                    modifier = Modifier.testTag("switch_has_ended"),
+                )
+            }
+
+            if (uiState.draft.hasEnded) {
+                DateTimeRow(
+                    epochMillis = uiState.draft.endEpochMillis ?: uiState.draft.startEpochMillis,
+                    onPick = viewModel::onEndDateTimeChange,
+                    errorText = uiState.errors[LogField.EndDateTime],
+                    testTagPrefix = "end",
+                )
+            }
+
+            HorizontalDivider()
+
+            SectionHeader("Severity", "How bad did it feel from 1 to 10?")
+            SeveritySlider(
+                value = uiState.draft.severity,
+                onValueChange = viewModel::onSeverityChange,
+            )
+
+            HorizontalDivider()
+
+            SectionHeader("Context", "Factors that may have contributed.")
+            @OptIn(ExperimentalLayoutApi::class)
+            FlowRow(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
+                verticalArrangement = Arrangement.spacedBy(4.dp),
+            ) {
+                ContextTagCatalog.tags.forEach { tag ->
+                    val selected = uiState.draft.contextTags.contains(tag)
+                    FilterChip(
+                        selected = selected,
+                        onClick = { viewModel.onToggleTag(tag) },
+                        label = { Text(tag) },
+                        leadingIcon = if (selected) {
+                            { Icon(Icons.Filled.Check, contentDescription = null, modifier = Modifier.size(FilterChipDefaults.IconSize)) }
+                        } else null,
+                        modifier = Modifier
+                            .heightIn(min = 48.dp)
+                            .testTag("tag_$tag"),
+                    )
+                }
+            }
+
+            OutlinedTextField(
+                value = uiState.draft.medication,
+                onValueChange = viewModel::onMedicationChange,
+                label = { Text("Medication") },
+                placeholder = { Text("What did you take? (optional)") },
+                modifier = Modifier.fillMaxWidth().testTag("field_medication"),
+            )
+
+            OutlinedTextField(
+                value = uiState.draft.notes,
+                onValueChange = viewModel::onNotesChange,
+                label = { Text("Notes") },
+                placeholder = { Text("Anything else worth remembering") },
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .heightIn(min = 96.dp)
+                    .testTag("field_notes"),
+                minLines = 3,
+            )
+
+            Spacer(Modifier.height(8.dp))
+
+            Button(
+                onClick = { viewModel.save(onSaved) },
+                enabled = !uiState.isSaving,
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .heightIn(min = 56.dp)
+                    .testTag("btn_save"),
+            ) {
+                Text(if (uiState.isSaving) "Saving…" else "Save log")
+            }
+
+            Spacer(Modifier.height(12.dp))
+        }
+    }
+}
+
+@Composable
+private fun SectionHeader(title: String, subtitle: String) {
+    Column {
+        Text(title, style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.SemiBold)
+        Text(
+            subtitle,
+            style = MaterialTheme.typography.bodyMedium,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+        )
+    }
+}
+
+@Composable
+private fun ErrorBanner(errors: List<String>, onDismiss: () -> Unit) {
+    Card(
+        colors = CardDefaults.cardColors(
+            containerColor = MaterialTheme.colorScheme.errorContainer,
+            contentColor = MaterialTheme.colorScheme.onErrorContainer,
+        ),
+        shape = RoundedCornerShape(16.dp),
+        modifier = Modifier.fillMaxWidth().testTag("error_banner"),
+    ) {
+        Row(
+            modifier = Modifier.padding(16.dp),
+            verticalAlignment = Alignment.Top,
+        ) {
+            Icon(Icons.Filled.ErrorOutline, contentDescription = null)
+            Spacer(Modifier.width(12.dp))
+            Column(modifier = Modifier.weight(1f)) {
+                Text("Please fix the following:", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold)
+                Spacer(Modifier.height(4.dp))
+                errors.forEach { message ->
+                    Text("• $message", style = MaterialTheme.typography.bodyMedium)
+                }
+            }
+            TextButton(
+                onClick = onDismiss,
+                modifier = Modifier.sizeIn(minWidth = 48.dp, minHeight = 48.dp),
+            ) {
+                Text("Dismiss")
+            }
+        }
+    }
+}
+
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+private fun SymptomPicker(
+    value: String,
+    onValueChange: (String) -> Unit,
+    isError: Boolean,
+    errorText: String?,
+) {
+    var expanded by remember { mutableStateOf(false) }
+    val filteredOptions = remember(value) {
+        if (value.isBlank()) SymptomCatalog.presets
+        else SymptomCatalog.presets.filter { it.contains(value, ignoreCase = true) && !it.equals(value, ignoreCase = true) }
+    }
+
+    ExposedDropdownMenuBox(
+        expanded = expanded && filteredOptions.isNotEmpty(),
+        onExpandedChange = { expanded = it },
+    ) {
+        OutlinedTextField(
+            value = value,
+            onValueChange = {
+                onValueChange(it)
+                expanded = true
+            },
+            label = { Text("Symptom type") },
+            placeholder = { Text("Choose a preset or type your own") },
+            trailingIcon = { ExposedDropdownMenuDefaults.TrailingIcon(expanded = expanded) },
+            isError = isError,
+            supportingText = errorText?.let { { Text(it) } },
+            singleLine = true,
+            modifier = Modifier
+                .menuAnchor(MenuAnchorType.PrimaryEditable, enabled = true)
+                .fillMaxWidth()
+                .testTag("field_symptom"),
+        )
+        SymptomDropdown(
+            expanded = expanded && filteredOptions.isNotEmpty(),
+            onDismiss = { expanded = false },
+            options = filteredOptions,
+            onPick = {
+                onValueChange(it)
+                expanded = false
+            },
+        )
+    }
+}
+
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+private fun ExposedDropdownMenuBoxScope.SymptomDropdown(
+    expanded: Boolean,
+    onDismiss: () -> Unit,
+    options: List<String>,
+    onPick: (String) -> Unit,
+) {
+    ExposedDropdownMenu(
+        expanded = expanded,
+        onDismissRequest = onDismiss,
+    ) {
+        options.forEach { option ->
+            DropdownMenuItem(
+                text = { Text(option) },
+                onClick = { onPick(option) },
+            )
+        }
+    }
+}
+
+@Composable
+private fun DateTimeRow(
+    epochMillis: Long,
+    onPick: (Long) -> Unit,
+    errorText: String?,
+    testTagPrefix: String,
+) {
+    var showDatePicker by remember { mutableStateOf(false) }
+    var showTimePicker by remember { mutableStateOf(false) }
+    val zone = remember { ZoneId.systemDefault() }
+    val local = remember(epochMillis) {
+        Instant.ofEpochMilli(epochMillis).atZone(zone).toLocalDateTime()
+    }
+
+    Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.spacedBy(12.dp),
+        ) {
+            PillButton(
+                icon = Icons.Filled.CalendarMonth,
+                label = local.format(DateFormatter),
+                onClick = { showDatePicker = true },
+                modifier = Modifier.weight(1f).testTag("${testTagPrefix}_date"),
+            )
+            PillButton(
+                icon = Icons.Filled.Schedule,
+                label = local.format(TimeFormatter),
+                onClick = { showTimePicker = true },
+                modifier = Modifier.testTag("${testTagPrefix}_time"),
+            )
+        }
+        if (errorText != null) {
+            Text(errorText, color = MaterialTheme.colorScheme.error, style = MaterialTheme.typography.bodySmall)
+        }
+    }
+
+    if (showDatePicker) {
+        DatePickerSheet(
+            initial = local.toLocalDate(),
+            onDismiss = { showDatePicker = false },
+            onConfirm = { newDate ->
+                val updated = LocalDateTime.of(newDate, local.toLocalTime())
+                onPick(updated.atZone(zone).toInstant().toEpochMilli())
+                showDatePicker = false
+            },
+        )
+    }
+
+    if (showTimePicker) {
+        TimePickerSheet(
+            initial = local.toLocalTime(),
+            onDismiss = { showTimePicker = false },
+            onConfirm = { newTime ->
+                val updated = LocalDateTime.of(local.toLocalDate(), newTime)
+                onPick(updated.atZone(zone).toInstant().toEpochMilli())
+                showTimePicker = false
+            },
+        )
+    }
+}
+
+@Composable
+private fun PillButton(
+    icon: androidx.compose.ui.graphics.vector.ImageVector,
+    label: String,
+    onClick: () -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    Surface(
+        onClick = onClick,
+        color = MaterialTheme.colorScheme.secondaryContainer,
+        contentColor = MaterialTheme.colorScheme.onSecondaryContainer,
+        shape = RoundedCornerShape(16.dp),
+        modifier = modifier.heightIn(min = 56.dp),
+    ) {
+        Row(
+            modifier = Modifier.padding(horizontal = 16.dp, vertical = 12.dp),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(8.dp),
+        ) {
+            Icon(icon, contentDescription = null)
+            Text(label, style = MaterialTheme.typography.titleMedium)
+        }
+    }
+}
+
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+private fun DatePickerSheet(
+    initial: LocalDate,
+    onDismiss: () -> Unit,
+    onConfirm: (LocalDate) -> Unit,
+) {
+    val initialMillis = initial.atStartOfDay(ZoneId.systemDefault()).toInstant().toEpochMilli()
+    val state = rememberDatePickerState(initialSelectedDateMillis = initialMillis)
+    DatePickerDialog(
+        onDismissRequest = onDismiss,
+        confirmButton = {
+            TextButton(
+                onClick = {
+                    val picked = state.selectedDateMillis ?: initialMillis
+                    val date = Instant.ofEpochMilli(picked).atZone(ZoneId.systemDefault()).toLocalDate()
+                    onConfirm(date)
+                },
+                modifier = Modifier.sizeIn(minWidth = 48.dp, minHeight = 48.dp),
+            ) { Text("OK") }
+        },
+        dismissButton = {
+            TextButton(onClick = onDismiss, modifier = Modifier.sizeIn(minWidth = 48.dp, minHeight = 48.dp)) { Text("Cancel") }
+        },
+    ) {
+        DatePicker(state = state)
+    }
+}
+
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+private fun TimePickerSheet(
+    initial: LocalTime,
+    onDismiss: () -> Unit,
+    onConfirm: (LocalTime) -> Unit,
+) {
+    val state = rememberTimePickerState(initialHour = initial.hour, initialMinute = initial.minute, is24Hour = true)
+    Dialog(onDismissRequest = onDismiss) {
+        Surface(
+            shape = RoundedCornerShape(24.dp),
+            color = MaterialTheme.colorScheme.surface,
+        ) {
+            Column(
+                modifier = Modifier.padding(24.dp),
+                verticalArrangement = Arrangement.spacedBy(16.dp),
+            ) {
+                Text("Select time", style = MaterialTheme.typography.titleLarge)
+                TimePicker(state = state)
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.End,
+                ) {
+                    TextButton(onClick = onDismiss, modifier = Modifier.sizeIn(minWidth = 48.dp, minHeight = 48.dp)) { Text("Cancel") }
+                    Spacer(Modifier.width(8.dp))
+                    TextButton(
+                        onClick = { onConfirm(LocalTime.of(state.hour, state.minute)) },
+                        modifier = Modifier.sizeIn(minWidth = 48.dp, minHeight = 48.dp),
+                    ) { Text("OK") }
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun SeveritySlider(
+    value: Int,
+    onValueChange: (Int) -> Unit,
+) {
+    Column {
+        Box(modifier = Modifier.fillMaxWidth()) {
+            Text(
+                text = value.toString(),
+                style = MaterialTheme.typography.displayLarge,
+                color = MaterialTheme.colorScheme.primary,
+                modifier = Modifier
+                    .align(Alignment.Center)
+                    .testTag("severity_value"),
+            )
+        }
+        Slider(
+            value = value.toFloat(),
+            onValueChange = { onValueChange(kotlin.math.round(it).toInt()) },
+            valueRange = LogValidator.MIN_SEVERITY.toFloat()..LogValidator.MAX_SEVERITY.toFloat(),
+            steps = LogValidator.MAX_SEVERITY - LogValidator.MIN_SEVERITY - 1,
+            modifier = Modifier
+                .fillMaxWidth()
+                .heightIn(min = 48.dp)
+                .testTag("severity_slider"),
+        )
+        Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+            Text("Mild", style = MaterialTheme.typography.labelLarge, color = MaterialTheme.colorScheme.onSurfaceVariant)
+            Text("Severe", style = MaterialTheme.typography.labelLarge, color = MaterialTheme.colorScheme.onSurfaceVariant)
+        }
+    }
+}
