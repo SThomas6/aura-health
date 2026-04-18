@@ -4,9 +4,9 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.Text
 import androidx.compose.material3.adaptive.navigationsuite.NavigationSuiteScaffold
 import androidx.compose.runtime.Composable
-import androidx.compose.runtime.getValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.testTag
+import androidx.lifecycle.viewmodel.compose.viewModel
 import androidx.navigation.NavController
 import androidx.navigation.NavDestination.Companion.hasRoute
 import androidx.navigation.NavDestination.Companion.hierarchy
@@ -15,9 +15,15 @@ import androidx.navigation.compose.NavHost
 import androidx.navigation.compose.composable
 import androidx.navigation.compose.currentBackStackEntryAsState
 import androidx.navigation.compose.rememberNavController
+import androidx.navigation.toRoute
+import androidx.compose.runtime.getValue
+import com.example.mob_dev_portfolio.ui.detail.LogDetailScreen
 import com.example.mob_dev_portfolio.ui.history.HistoryScreen
 import com.example.mob_dev_portfolio.ui.home.HomeScreen
 import com.example.mob_dev_portfolio.ui.log.LogSymptomScreen
+import com.example.mob_dev_portfolio.ui.log.LogSymptomViewModel
+import com.example.mob_dev_portfolio.ui.navigation.DetailRoute
+import com.example.mob_dev_portfolio.ui.navigation.EditLogRoute
 import com.example.mob_dev_portfolio.ui.navigation.TopLevelDestinations
 import com.example.mob_dev_portfolio.ui.navigation.TopLevelRoute
 
@@ -33,7 +39,11 @@ fun AuraApp() {
                 val selected = when (dest.route) {
                     TopLevelRoute.Home -> hierarchy?.any { it.hasRoute<TopLevelRoute.Home>() } == true
                     TopLevelRoute.Log -> hierarchy?.any { it.hasRoute<TopLevelRoute.Log>() } == true
-                    TopLevelRoute.History -> hierarchy?.any { it.hasRoute<TopLevelRoute.History>() } == true
+                    TopLevelRoute.History -> hierarchy?.any {
+                        it.hasRoute<TopLevelRoute.History>() ||
+                            it.hasRoute<DetailRoute>() ||
+                            it.hasRoute<EditLogRoute>()
+                    } == true
                 }
                 item(
                     selected = selected,
@@ -53,6 +63,7 @@ fun AuraApp() {
                 HomeScreen(
                     onLogSymptomClick = { navigateToTopLevel(navController, TopLevelRoute.Log) },
                     onViewHistoryClick = { navigateToTopLevel(navController, TopLevelRoute.History) },
+                    onOpenLog = { id -> navController.navigate(DetailRoute(id)) },
                 )
             }
             composable<TopLevelRoute.Log> {
@@ -66,7 +77,40 @@ fun AuraApp() {
                 )
             }
             composable<TopLevelRoute.History> {
-                HistoryScreen()
+                HistoryScreen(
+                    onOpenLog = { id -> navController.navigate(DetailRoute(id)) },
+                )
+            }
+            composable<DetailRoute> { entry ->
+                val route = entry.toRoute<DetailRoute>()
+                LogDetailScreen(
+                    id = route.id,
+                    onBack = {
+                        if (!navController.popBackStack()) {
+                            navigateToTopLevel(navController, TopLevelRoute.History)
+                        }
+                    },
+                    onEdit = { id -> navController.navigate(EditLogRoute(id)) },
+                    onDeleted = {
+                        if (!navController.popBackStack()) {
+                            navigateToTopLevel(navController, TopLevelRoute.History)
+                        }
+                    },
+                )
+            }
+            composable<EditLogRoute> { entry ->
+                val route = entry.toRoute<EditLogRoute>()
+                LogSymptomScreen(
+                    onBack = {
+                        if (!navController.popBackStack()) {
+                            navigateToTopLevel(navController, TopLevelRoute.History)
+                        }
+                    },
+                    onSaved = {
+                        navController.popBackStack(DetailRoute(route.id), inclusive = false)
+                    },
+                    viewModel = viewModel(factory = LogSymptomViewModel.editFactory(route.id)),
+                )
             }
         }
     }

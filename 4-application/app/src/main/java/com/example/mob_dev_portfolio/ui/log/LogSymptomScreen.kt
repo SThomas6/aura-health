@@ -7,6 +7,7 @@ import androidx.compose.foundation.layout.ExperimentalLayoutApi
 import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.heightIn
@@ -26,6 +27,7 @@ import androidx.compose.material.icons.filled.Schedule
 import androidx.compose.material3.Button
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
+import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.DatePicker
 import androidx.compose.material3.DatePickerDialog
 import androidx.compose.material3.DropdownMenuItem
@@ -96,10 +98,19 @@ fun LogSymptomScreen(
         }
     }
 
+    LaunchedEffect(uiState.transientError) {
+        uiState.transientError?.let {
+            snackbarHost.showSnackbar(it)
+            viewModel.onTransientErrorShown()
+        }
+    }
+
+    val isEditing = uiState.editingId != 0L
+
     Scaffold(
         topBar = {
             TopAppBar(
-                title = { Text("Log a symptom") },
+                title = { Text(if (isEditing) "Edit log" else "Log a symptom") },
                 navigationIcon = {
                     IconButton(onClick = onBack, modifier = Modifier.sizeIn(minWidth = 48.dp, minHeight = 48.dp)) {
                         Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Back")
@@ -109,6 +120,30 @@ fun LogSymptomScreen(
         },
         snackbarHost = { SnackbarHost(snackbarHost) },
     ) { padding ->
+        when (val loadState = uiState.editLoadState) {
+            is EditLoadState.Loading -> {
+                EditLoadingState(modifier = Modifier.padding(padding).fillMaxSize())
+                return@Scaffold
+            }
+            is EditLoadState.NotFound -> {
+                EditNotFoundState(
+                    onBack = onBack,
+                    modifier = Modifier.padding(padding).fillMaxSize(),
+                )
+                return@Scaffold
+            }
+            is EditLoadState.Failed -> {
+                EditFailedState(
+                    message = loadState.message,
+                    onRetry = viewModel::retryLoadForEditing,
+                    onBack = onBack,
+                    modifier = Modifier.padding(padding).fillMaxSize(),
+                )
+                return@Scaffold
+            }
+            else -> Unit
+        }
+
         Column(
             modifier = Modifier
                 .padding(padding)
@@ -241,13 +276,19 @@ fun LogSymptomScreen(
 
             Button(
                 onClick = { viewModel.save(onSaved) },
-                enabled = !uiState.isSaving,
+                enabled = !uiState.isSaving && !uiState.isLoading,
                 modifier = Modifier
                     .fillMaxWidth()
                     .heightIn(min = 56.dp)
                     .testTag("btn_save"),
             ) {
-                Text(if (uiState.isSaving) "Saving…" else "Save log")
+                Text(
+                    when {
+                        uiState.isSaving -> "Saving…"
+                        isEditing -> "Save changes"
+                        else -> "Save log"
+                    },
+                )
             }
 
             Spacer(Modifier.height(12.dp))
@@ -515,6 +556,74 @@ private fun TimePickerSheet(
                     ) { Text("OK") }
                 }
             }
+        }
+    }
+}
+
+@Composable
+private fun EditLoadingState(modifier: Modifier = Modifier) {
+    Box(modifier = modifier.testTag("edit_loading"), contentAlignment = Alignment.Center) {
+        Column(horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(12.dp)) {
+            CircularProgressIndicator()
+            Text("Loading log…", style = MaterialTheme.typography.bodyMedium)
+        }
+    }
+}
+
+@Composable
+private fun EditNotFoundState(onBack: () -> Unit, modifier: Modifier = Modifier) {
+    Box(modifier = modifier.testTag("edit_not_found"), contentAlignment = Alignment.Center) {
+        Column(
+            horizontalAlignment = Alignment.CenterHorizontally,
+            verticalArrangement = Arrangement.spacedBy(12.dp),
+            modifier = Modifier.padding(24.dp),
+        ) {
+            Text("Log unavailable", style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.SemiBold)
+            Text(
+                "This entry has been deleted or is no longer available.",
+                style = MaterialTheme.typography.bodyMedium,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+            Spacer(Modifier.height(4.dp))
+            Button(
+                onClick = onBack,
+                modifier = Modifier.heightIn(min = 48.dp).testTag("btn_edit_not_found_back"),
+            ) { Text("Go back") }
+        }
+    }
+}
+
+@Composable
+private fun EditFailedState(
+    message: String,
+    onRetry: () -> Unit,
+    onBack: () -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    Box(modifier = modifier.testTag("edit_failed"), contentAlignment = Alignment.Center) {
+        Column(
+            horizontalAlignment = Alignment.CenterHorizontally,
+            verticalArrangement = Arrangement.spacedBy(12.dp),
+            modifier = Modifier.padding(24.dp),
+        ) {
+            Icon(
+                Icons.Filled.ErrorOutline,
+                contentDescription = null,
+                modifier = Modifier.size(40.dp),
+                tint = MaterialTheme.colorScheme.error,
+            )
+            Text("Couldn't load this log", style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.SemiBold)
+            Text(
+                message,
+                style = MaterialTheme.typography.bodyMedium,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+            Spacer(Modifier.height(4.dp))
+            Button(
+                onClick = onRetry,
+                modifier = Modifier.heightIn(min = 48.dp).testTag("btn_edit_retry"),
+            ) { Text("Try again") }
+            TextButton(onClick = onBack) { Text("Go back") }
         }
     }
 }
