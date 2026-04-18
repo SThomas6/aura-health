@@ -10,6 +10,7 @@ data class LogDraft(
     val medication: String = "",
     val contextTags: Set<String> = emptySet(),
     val notes: String = "",
+    val createdAtEpochMillis: Long = System.currentTimeMillis(),
 )
 
 enum class LogField { SymptomName, Description, StartDateTime, EndDateTime, Severity }

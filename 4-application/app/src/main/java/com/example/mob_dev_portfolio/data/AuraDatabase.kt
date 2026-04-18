@@ -4,6 +4,7 @@ import android.content.Context
 import androidx.room.Database
 import androidx.room.Room
 import androidx.room.RoomDatabase
+import net.zetetic.database.sqlcipher.SupportOpenHelperFactory
 
 @Database(
     entities = [SymptomLogEntity::class],
@@ -18,13 +19,14 @@ abstract class AuraDatabase : RoomDatabase() {
         @Volatile
         private var instance: AuraDatabase? = null
 
-        fun get(context: Context): AuraDatabase =
+        fun get(context: Context, passphrase: ByteArray): AuraDatabase =
             instance ?: synchronized(this) {
                 instance ?: Room.databaseBuilder(
                     context.applicationContext,
                     AuraDatabase::class.java,
                     "aura.db",
                 )
+                    .openHelperFactory(SupportOpenHelperFactory(passphrase.copyOf()))
                     .fallbackToDestructiveMigration(dropAllTables = true)
                     .build()
                     .also { instance = it }

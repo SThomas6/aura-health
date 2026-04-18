@@ -16,6 +16,12 @@ sealed interface TopLevelRoute {
     data object History : TopLevelRoute
 }
 
+@Serializable
+data class DetailRoute(val id: Long)
+
+@Serializable
+data class EditLogRoute(val id: Long)
+
 data class TopLevelDestination(
     val route: TopLevelRoute,
     val label: String,

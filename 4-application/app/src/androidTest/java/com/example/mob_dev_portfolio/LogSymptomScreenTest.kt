@@ -91,7 +91,17 @@ private class FakeRepository : SymptomLogRepository(FakeDao()) {
 private class FakeDao : com.example.mob_dev_portfolio.data.SymptomLogDao {
     private val flow = MutableStateFlow<List<com.example.mob_dev_portfolio.data.SymptomLogEntity>>(emptyList())
     override suspend fun insert(entity: com.example.mob_dev_portfolio.data.SymptomLogEntity): Long = 1L
+    override suspend fun update(entity: com.example.mob_dev_portfolio.data.SymptomLogEntity): Int = 1
     override fun observeAll() = flow.asStateFlow()
+    override fun observeFiltered(
+        query: String?,
+        minSeverity: Int,
+        maxSeverity: Int,
+        startAfter: Long?,
+        startBefore: Long?,
+        sortKey: String,
+    ) = MutableStateFlow<List<com.example.mob_dev_portfolio.data.SymptomLogEntity>>(emptyList()).asStateFlow()
+    override fun observeById(id: Long) = MutableStateFlow<com.example.mob_dev_portfolio.data.SymptomLogEntity?>(null).asStateFlow()
     override fun observeCount() = MutableStateFlow(0).asStateFlow()
     override suspend fun delete(id: Long) = Unit
 }
