@@ -8,6 +8,10 @@ import androidx.datastore.preferences.preferencesDataStore
 import com.example.mob_dev_portfolio.data.AuraDatabase
 import com.example.mob_dev_portfolio.data.SymptomLogEntity
 import com.example.mob_dev_portfolio.data.SymptomLogRepository
+import com.example.mob_dev_portfolio.data.location.AndroidGeocoder
+import com.example.mob_dev_portfolio.data.location.FusedLocationProvider
+import com.example.mob_dev_portfolio.data.location.LocationProvider
+import com.example.mob_dev_portfolio.data.location.ReverseGeocoder
 import com.example.mob_dev_portfolio.data.preferences.UiPreferencesRepository
 import com.example.mob_dev_portfolio.data.security.DatabasePassphraseProvider
 import com.example.mob_dev_portfolio.data.security.PassphraseOutcome
@@ -21,6 +25,8 @@ private val Context.uiPreferencesStore: DataStore<Preferences> by preferencesDat
 interface AppContainer {
     val symptomLogRepository: SymptomLogRepository
     val uiPreferencesRepository: UiPreferencesRepository
+    val locationProvider: LocationProvider
+    val reverseGeocoder: ReverseGeocoder
 }
 
 class DefaultAppContainer(
@@ -74,6 +80,14 @@ class DefaultAppContainer(
 
     override val uiPreferencesRepository: UiPreferencesRepository by lazy {
         UiPreferencesRepository(appContext.uiPreferencesStore)
+    }
+
+    override val locationProvider: LocationProvider by lazy {
+        FusedLocationProvider(appContext)
+    }
+
+    override val reverseGeocoder: ReverseGeocoder by lazy {
+        AndroidGeocoder(appContext)
     }
 
     companion object {

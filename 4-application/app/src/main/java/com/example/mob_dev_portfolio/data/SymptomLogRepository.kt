@@ -62,6 +62,14 @@ data class SymptomLog(
     val contextTags: List<String>,
     val notes: String,
     val createdAtEpochMillis: Long = System.currentTimeMillis(),
+    val locationLatitude: Double? = null,
+    val locationLongitude: Double? = null,
+    /**
+     * Human-readable place string persisted once at save time. Never derived on
+     * read — the DB row is the source of truth. Null for logs captured before
+     * the geocoding migration or when geocoding failed.
+     */
+    val locationName: String? = null,
 )
 
 private fun SymptomLog.toEntity() = SymptomLogEntity(
@@ -75,6 +83,9 @@ private fun SymptomLog.toEntity() = SymptomLogEntity(
     contextTags = contextTags.joinToString("|"),
     notes = notes,
     createdAtEpochMillis = createdAtEpochMillis,
+    locationLatitude = locationLatitude,
+    locationLongitude = locationLongitude,
+    locationName = locationName,
 )
 
 private fun SymptomLogEntity.toDomain() = SymptomLog(
@@ -88,4 +99,7 @@ private fun SymptomLogEntity.toDomain() = SymptomLog(
     contextTags = if (contextTags.isBlank()) emptyList() else contextTags.split("|"),
     notes = notes,
     createdAtEpochMillis = createdAtEpochMillis,
+    locationLatitude = locationLatitude,
+    locationLongitude = locationLongitude,
+    locationName = locationName,
 )

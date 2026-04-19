@@ -1,5 +1,9 @@
 package com.example.mob_dev_portfolio.ui.log
 
+import android.Manifest
+import android.content.pm.PackageManager
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -23,6 +27,7 @@ import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.CalendarMonth
 import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.ErrorOutline
+import androidx.compose.material.icons.filled.LocationOn
 import androidx.compose.material.icons.filled.Schedule
 import androidx.compose.material3.Button
 import androidx.compose.material3.Card
@@ -63,9 +68,11 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
+import androidx.core.content.ContextCompat
 import androidx.compose.ui.window.Dialog
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewmodel.compose.viewModel
@@ -90,6 +97,30 @@ fun LogSymptomScreen(
 ) {
     val uiState by viewModel.state.collectAsStateWithLifecycle()
     val snackbarHost = remember { SnackbarHostState() }
+    val context = LocalContext.current
+
+    val permissionLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.RequestPermission(),
+    ) { granted ->
+        viewModel.onLocationPermissionResult(granted)
+    }
+
+    // Seed permission state on first composition — covers the case where the
+    // user granted it in a previous session or in system settings.
+    LaunchedEffect(Unit) {
+        val alreadyGranted = ContextCompat.checkSelfPermission(
+            context,
+            Manifest.permission.ACCESS_COARSE_LOCATION,
+        ) == PackageManager.PERMISSION_GRANTED
+        if (alreadyGranted) viewModel.onLocationPermissionResult(true)
+    }
+
+    LaunchedEffect(uiState.shouldRequestLocationPermission) {
+        if (uiState.shouldRequestLocationPermission) {
+            viewModel.onLocationPermissionRequestConsumed()
+            permissionLauncher.launch(Manifest.permission.ACCESS_COARSE_LOCATION)
+        }
+    }
 
     LaunchedEffect(uiState.savedConfirmation) {
         uiState.savedConfirmation?.let {
@@ -270,6 +301,15 @@ fun LogSymptomScreen(
                     .heightIn(min = 96.dp)
                     .testTag("field_notes"),
                 minLines = 3,
+            )
+
+            HorizontalDivider()
+
+            LocationOptIn(
+                attachLocation = uiState.draft.attachLocation,
+                permissionGranted = uiState.locationPermissionGranted,
+                capturedLocationName = uiState.draft.locationName,
+                onToggle = viewModel::onAttachLocationChange,
             )
 
             Spacer(Modifier.height(8.dp))
@@ -624,6 +664,60 @@ private fun EditFailedState(
                 modifier = Modifier.heightIn(min = 48.dp).testTag("btn_edit_retry"),
             ) { Text("Try again") }
             TextButton(onClick = onBack) { Text("Go back") }
+        }
+    }
+}
+
+@Composable
+private fun LocationOptIn(
+    attachLocation: Boolean,
+    permissionGranted: Boolean,
+    capturedLocationName: String?,
+    onToggle: (Boolean) -> Unit,
+) {
+    Surface(
+        color = MaterialTheme.colorScheme.surfaceVariant,
+        contentColor = MaterialTheme.colorScheme.onSurfaceVariant,
+        shape = RoundedCornerShape(16.dp),
+        modifier = Modifier.fillMaxWidth().testTag("location_section"),
+    ) {
+        Column(
+            modifier = Modifier.padding(16.dp),
+            verticalArrangement = Arrangement.spacedBy(8.dp),
+        ) {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Icon(Icons.Filled.LocationOn, contentDescription = null)
+                Spacer(Modifier.width(12.dp))
+                Column(modifier = Modifier.weight(1f)) {
+                    Text("Attach approximate location", style = MaterialTheme.typography.titleMedium)
+                    Text(
+                        "We fetch a fresh coordinate only when you save, round it to ~1 km, and store the place name — never the exact fix.",
+                        style = MaterialTheme.typography.bodySmall,
+                    )
+                }
+                Switch(
+                    checked = attachLocation,
+                    onCheckedChange = onToggle,
+                    modifier = Modifier.testTag("switch_attach_location"),
+                )
+            }
+            if (attachLocation && !permissionGranted) {
+                Text(
+                    "Location permission is required. Toggle again to request it, or enable it in system settings.",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.error,
+                    modifier = Modifier.testTag("location_permission_warning"),
+                )
+            }
+            if (attachLocation && permissionGranted && !capturedLocationName.isNullOrBlank()) {
+                // Show the stored place name from a previous save. Raw coords
+                // are never rendered here.
+                Text(
+                    "Saved location: $capturedLocationName",
+                    style = MaterialTheme.typography.bodySmall,
+                    modifier = Modifier.testTag("location_captured_preview"),
+                )
+            }
         }
     }
 }

@@ -7,6 +7,10 @@ import androidx.lifecycle.viewmodel.CreationExtras
 import com.example.mob_dev_portfolio.AuraApplication
 import com.example.mob_dev_portfolio.data.SymptomLog
 import com.example.mob_dev_portfolio.data.SymptomLogRepository
+import com.example.mob_dev_portfolio.data.location.CoordinateRounding
+import com.example.mob_dev_portfolio.data.location.LocationProvider
+import com.example.mob_dev_portfolio.data.location.LocationResult
+import com.example.mob_dev_portfolio.data.location.ReverseGeocoder
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -32,10 +36,19 @@ data class LogSymptomUiState(
     val editingId: Long = 0L,
     val isLoading: Boolean = false,
     val editLoadState: EditLoadState = EditLoadState.NotEditing,
+    /** True once the user has granted the COARSE location permission this session. */
+    val locationPermissionGranted: Boolean = false,
+    /**
+     * Set when the toggle is switched on while permission is not granted — the
+     * screen observes this signal to launch the system permission dialog.
+     */
+    val shouldRequestLocationPermission: Boolean = false,
 )
 
 class LogSymptomViewModel(
     private val repository: SymptomLogRepository,
+    private val locationProvider: LocationProvider? = null,
+    private val reverseGeocoder: ReverseGeocoder? = null,
     private val editingId: Long = 0L,
     private val nowProvider: () -> Long = { System.currentTimeMillis() },
 ) : ViewModel() {
@@ -119,6 +132,53 @@ class LogSymptomViewModel(
         copy(contextTags = if (contextTags.contains(tag)) contextTags - tag else contextTags + tag)
     }
 
+    /**
+     * Toggles the opt-in to attach location at save time. If the user is
+     * turning it on and we don't yet hold COARSE permission, emit a signal
+     * so the screen can show the system permission dialog.
+     */
+    fun onAttachLocationChange(attach: Boolean) {
+        _state.update { current ->
+            if (!attach) {
+                // User opted out — clear any previously captured coords too.
+                current.copy(
+                    draft = current.draft.copy(
+                        attachLocation = false,
+                        locationLatitude = null,
+                        locationLongitude = null,
+                    ),
+                    shouldRequestLocationPermission = false,
+                )
+            } else if (current.locationPermissionGranted) {
+                current.copy(draft = current.draft.copy(attachLocation = true))
+            } else {
+                current.copy(
+                    draft = current.draft.copy(attachLocation = true),
+                    shouldRequestLocationPermission = true,
+                )
+            }
+        }
+    }
+
+    fun onLocationPermissionResult(granted: Boolean) {
+        _state.update { current ->
+            current.copy(
+                locationPermissionGranted = granted,
+                shouldRequestLocationPermission = false,
+                draft = if (granted) current.draft else current.draft.copy(attachLocation = false),
+                transientError = if (!granted && current.draft.attachLocation) {
+                    "Location permission denied — location won't be attached."
+                } else {
+                    current.transientError
+                },
+            )
+        }
+    }
+
+    fun onLocationPermissionRequestConsumed() {
+        _state.update { it.copy(shouldRequestLocationPermission = false) }
+    }
+
     fun onConfirmationShown() {
         _state.update { it.copy(savedConfirmation = null) }
     }
@@ -145,6 +205,19 @@ class LogSymptomViewModel(
         viewModelScope.launch {
             val draft = current.draft
             val isEditing = current.editingId != 0L
+
+            // Location is captured **here, at save time**, never earlier.
+            // If the user didn't opt in, or permission wasn't granted, or the
+            // provider returns anything other than coordinates, we persist
+            // null — saving always succeeds even when location fails.
+            val capture = maybeCaptureLocation(
+                attach = draft.attachLocation,
+                permissionGranted = current.locationPermissionGranted,
+                fallbackLat = draft.locationLatitude,
+                fallbackLng = draft.locationLongitude,
+                fallbackName = draft.locationName,
+            )
+
             val log = SymptomLog(
                 id = current.editingId,
                 symptomName = draft.symptomName.trim(),
@@ -156,6 +229,9 @@ class LogSymptomViewModel(
                 contextTags = draft.contextTags.toList().sorted(),
                 notes = draft.notes.trim(),
                 createdAtEpochMillis = if (isEditing) draft.createdAtEpochMillis else nowProvider(),
+                locationLatitude = capture.latitude,
+                locationLongitude = capture.longitude,
+                locationName = capture.name,
             )
             val saveOutcome = runCatching {
                 if (isEditing) {
@@ -189,10 +265,84 @@ class LogSymptomViewModel(
                 it.copy(
                     isSaving = false,
                     draft = if (isEditing) draft else LogDraft(startEpochMillis = nowProvider()),
-                    savedConfirmation = if (isEditing) "Log updated" else "Log saved",
+                    savedConfirmation = when {
+                        isEditing -> "Log updated"
+                        capture.latitude != null -> "Log saved with location"
+                        draft.attachLocation && capture.warning != null -> "Log saved — ${capture.warning}"
+                        else -> "Log saved"
+                    },
+                    transientError = if (!isEditing && capture.warning != null) capture.warning else it.transientError,
                 )
             }
             onSaved()
+        }
+    }
+
+    private data class CaptureOutcome(
+        val latitude: Double?,
+        val longitude: Double?,
+        val name: String? = null,
+        val warning: String? = null,
+    )
+
+    private suspend fun maybeCaptureLocation(
+        attach: Boolean,
+        permissionGranted: Boolean,
+        fallbackLat: Double?,
+        fallbackLng: Double?,
+        fallbackName: String?,
+    ): CaptureOutcome {
+        if (!attach) return CaptureOutcome(latitude = null, longitude = null)
+        val provider = locationProvider
+            ?: return CaptureOutcome(
+                latitude = fallbackLat,
+                longitude = fallbackLng,
+                name = fallbackName,
+                warning = "Location services unavailable on this device.",
+            )
+        if (!permissionGranted) {
+            return CaptureOutcome(
+                latitude = fallbackLat,
+                longitude = fallbackLng,
+                name = fallbackName,
+                warning = "Location permission not granted — location not attached.",
+            )
+        }
+        return when (val result = provider.fetchCurrentLocation()) {
+            is LocationResult.Coordinates -> {
+                // Round FIRST — every downstream consumer (DB, geocoder, UI)
+                // sees the same ~1 km grid.
+                val roundedLat = CoordinateRounding.roundCoordinate(result.latitude)
+                val roundedLng = CoordinateRounding.roundCoordinate(result.longitude)
+                // Reverse geocode on the rounded pair — never the raw fix.
+                // Runs once here at save time; the resulting string is
+                // persisted and re-read, never recomputed on UI bind.
+                val name = reverseGeocoder?.reverseGeocode(roundedLat, roundedLng)
+                    ?: ReverseGeocoder.UNAVAILABLE
+                CaptureOutcome(
+                    latitude = roundedLat,
+                    longitude = roundedLng,
+                    name = name,
+                )
+            }
+            is LocationResult.PermissionDenied -> CaptureOutcome(
+                latitude = fallbackLat,
+                longitude = fallbackLng,
+                name = fallbackName,
+                warning = "Location permission denied — location not attached.",
+            )
+            is LocationResult.Unavailable -> CaptureOutcome(
+                latitude = fallbackLat,
+                longitude = fallbackLng,
+                name = fallbackName,
+                warning = "Couldn't get a location fix — saved without it.",
+            )
+            is LocationResult.Failed -> CaptureOutcome(
+                latitude = fallbackLat,
+                longitude = fallbackLng,
+                name = fallbackName,
+                warning = "Location error: ${result.message}",
+            )
         }
     }
 
@@ -209,7 +359,11 @@ class LogSymptomViewModel(
             @Suppress("UNCHECKED_CAST")
             override fun <T : ViewModel> create(modelClass: Class<T>, extras: CreationExtras): T {
                 val app = extras[ViewModelProvider.AndroidViewModelFactory.APPLICATION_KEY] as AuraApplication
-                return LogSymptomViewModel(app.container.symptomLogRepository) as T
+                return LogSymptomViewModel(
+                    repository = app.container.symptomLogRepository,
+                    locationProvider = app.container.locationProvider,
+                    reverseGeocoder = app.container.reverseGeocoder,
+                ) as T
             }
         }
 
@@ -217,7 +371,12 @@ class LogSymptomViewModel(
             @Suppress("UNCHECKED_CAST")
             override fun <T : ViewModel> create(modelClass: Class<T>, extras: CreationExtras): T {
                 val app = extras[ViewModelProvider.AndroidViewModelFactory.APPLICATION_KEY] as AuraApplication
-                return LogSymptomViewModel(app.container.symptomLogRepository, editingId = id) as T
+                return LogSymptomViewModel(
+                    repository = app.container.symptomLogRepository,
+                    locationProvider = app.container.locationProvider,
+                    reverseGeocoder = app.container.reverseGeocoder,
+                    editingId = id,
+                ) as T
             }
         }
     }
@@ -234,4 +393,8 @@ private fun SymptomLog.toDraft(): LogDraft = LogDraft(
     contextTags = contextTags.toSet(),
     notes = notes,
     createdAtEpochMillis = createdAtEpochMillis,
+    attachLocation = locationLatitude != null && locationLongitude != null,
+    locationLatitude = locationLatitude,
+    locationLongitude = locationLongitude,
+    locationName = locationName,
 )
