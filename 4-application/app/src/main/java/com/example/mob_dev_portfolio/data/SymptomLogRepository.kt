@@ -70,6 +70,19 @@ data class SymptomLog(
      * the geocoding migration or when geocoding failed.
      */
     val locationName: String? = null,
+    /**
+     * Environmental metrics captured once at save time from Open-Meteo.
+     * Every field is nullable so the symptom row persists even when the
+     * API call times out, fails, or the device is offline. On edit these
+     * values are carried through unchanged — the network layer is never
+     * re-consulted for an existing log.
+     */
+    val weatherCode: Int? = null,
+    val weatherDescription: String? = null,
+    val temperatureCelsius: Double? = null,
+    val humidityPercent: Int? = null,
+    val pressureHpa: Double? = null,
+    val airQualityIndex: Int? = null,
 )
 
 private fun SymptomLog.toEntity() = SymptomLogEntity(
@@ -86,6 +99,12 @@ private fun SymptomLog.toEntity() = SymptomLogEntity(
     locationLatitude = locationLatitude,
     locationLongitude = locationLongitude,
     locationName = locationName,
+    weatherCode = weatherCode,
+    weatherDescription = weatherDescription,
+    temperatureCelsius = temperatureCelsius,
+    humidityPercent = humidityPercent,
+    pressureHpa = pressureHpa,
+    airQualityIndex = airQualityIndex,
 )
 
 private fun SymptomLogEntity.toDomain() = SymptomLog(
@@ -102,4 +121,10 @@ private fun SymptomLogEntity.toDomain() = SymptomLog(
     locationLatitude = locationLatitude,
     locationLongitude = locationLongitude,
     locationName = locationName,
+    weatherCode = weatherCode,
+    weatherDescription = weatherDescription,
+    temperatureCelsius = temperatureCelsius,
+    humidityPercent = humidityPercent,
+    pressureHpa = pressureHpa,
+    airQualityIndex = airQualityIndex,
 )

@@ -25,6 +25,18 @@ data class LogDraft(
      * Pre-populated from the DB when editing; never derived in the UI.
      */
     val locationName: String? = null,
+    /**
+     * Environmental metrics carried through the draft so edit flow can
+     * preserve the original fetch verbatim. The VM enforces "never re-fetch
+     * on edit" — these fields are populated from the DB on load and written
+     * back unchanged on save.
+     */
+    val weatherCode: Int? = null,
+    val weatherDescription: String? = null,
+    val temperatureCelsius: Double? = null,
+    val humidityPercent: Int? = null,
+    val pressureHpa: Double? = null,
+    val airQualityIndex: Int? = null,
 )
 
 enum class LogField { SymptomName, Description, StartDateTime, EndDateTime, Severity }

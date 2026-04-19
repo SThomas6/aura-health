@@ -7,16 +7,21 @@ import androidx.lifecycle.viewmodel.CreationExtras
 import com.example.mob_dev_portfolio.AuraApplication
 import com.example.mob_dev_portfolio.data.SymptomLog
 import com.example.mob_dev_portfolio.data.SymptomLogRepository
+import com.example.mob_dev_portfolio.data.environment.EnvironmentalFetchResult
+import com.example.mob_dev_portfolio.data.environment.EnvironmentalService
+import com.example.mob_dev_portfolio.data.environment.EnvironmentalSnapshot
 import com.example.mob_dev_portfolio.data.location.CoordinateRounding
 import com.example.mob_dev_portfolio.data.location.LocationProvider
 import com.example.mob_dev_portfolio.data.location.LocationResult
 import com.example.mob_dev_portfolio.data.location.ReverseGeocoder
+import kotlinx.coroutines.TimeoutCancellationException
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withTimeout
 
 sealed interface EditLoadState {
     data object NotEditing : EditLoadState
@@ -49,8 +54,10 @@ class LogSymptomViewModel(
     private val repository: SymptomLogRepository,
     private val locationProvider: LocationProvider? = null,
     private val reverseGeocoder: ReverseGeocoder? = null,
+    private val environmentalService: EnvironmentalService? = null,
     private val editingId: Long = 0L,
     private val nowProvider: () -> Long = { System.currentTimeMillis() },
+    private val environmentalTimeoutMillis: Long = ENVIRONMENTAL_FETCH_TIMEOUT_MILLIS,
 ) : ViewModel() {
 
     private val _state = MutableStateFlow(
@@ -218,6 +225,19 @@ class LogSymptomViewModel(
                 fallbackName = draft.locationName,
             )
 
+            // Environmental data: fetched **only** on insert when a location was
+            // captured. Edits preserve the original reading verbatim — the
+            // network layer is not touched. This is the hard contract from the
+            // "editing bypasses the network layer entirely" acceptance criterion.
+            val envOutcome = if (isEditing) {
+                EnvironmentalOutcome(snapshot = draft.toSnapshot(), warning = null)
+            } else {
+                maybeFetchEnvironmental(
+                    lat = capture.latitude,
+                    lng = capture.longitude,
+                )
+            }
+
             val log = SymptomLog(
                 id = current.editingId,
                 symptomName = draft.symptomName.trim(),
@@ -232,6 +252,12 @@ class LogSymptomViewModel(
                 locationLatitude = capture.latitude,
                 locationLongitude = capture.longitude,
                 locationName = capture.name,
+                weatherCode = envOutcome.snapshot.weatherCode,
+                weatherDescription = envOutcome.snapshot.weatherDescription,
+                temperatureCelsius = envOutcome.snapshot.temperatureCelsius,
+                humidityPercent = envOutcome.snapshot.humidityPercent,
+                pressureHpa = envOutcome.snapshot.pressureHpa,
+                airQualityIndex = envOutcome.snapshot.airQualityIndex,
             )
             val saveOutcome = runCatching {
                 if (isEditing) {
@@ -261,20 +287,94 @@ class LogSymptomViewModel(
                 }
                 return@launch
             }
+            // Pick the most important warning to surface. Location warnings
+            // already exist from the previous story; the environmental layer
+            // adds its own (timeout, offline, API error). Both go to the same
+            // Snackbar channel so we don't stack two toasts on top of each
+            // other — location warning wins when both fire, because it's the
+            // gating one (no location means the env fetch was skipped).
+            val finalWarning = capture.warning ?: envOutcome.warning
             _state.update {
                 it.copy(
                     isSaving = false,
                     draft = if (isEditing) draft else LogDraft(startEpochMillis = nowProvider()),
                     savedConfirmation = when {
                         isEditing -> "Log updated"
+                        capture.latitude != null && !envOutcome.snapshot.isEmpty -> "Log saved with location & weather"
                         capture.latitude != null -> "Log saved with location"
-                        draft.attachLocation && capture.warning != null -> "Log saved — ${capture.warning}"
+                        draft.attachLocation && finalWarning != null -> "Log saved — $finalWarning"
                         else -> "Log saved"
                     },
-                    transientError = if (!isEditing && capture.warning != null) capture.warning else it.transientError,
+                    transientError = if (!isEditing && finalWarning != null) finalWarning else it.transientError,
                 )
             }
             onSaved()
+        }
+    }
+
+    private data class EnvironmentalOutcome(
+        val snapshot: EnvironmentalSnapshot,
+        val warning: String?,
+    )
+
+    /**
+     * Runs the 5-second environmental fetch. Skipped when there is no location
+     * (nothing to look up) or no service bound (tests, headless builds).
+     *
+     * Every failure mode is translated into a non-blocking Snackbar message
+     * via [EnvironmentalOutcome.warning]. The snapshot is returned as-is —
+     * the outer save flow persists whatever fields came back, even a partial
+     * success, without ever crashing the save.
+     */
+    private suspend fun maybeFetchEnvironmental(
+        lat: Double?,
+        lng: Double?,
+    ): EnvironmentalOutcome {
+        if (lat == null || lng == null) {
+            return EnvironmentalOutcome(EnvironmentalSnapshot.EMPTY, warning = null)
+        }
+        val service = environmentalService
+            ?: return EnvironmentalOutcome(EnvironmentalSnapshot.EMPTY, warning = null)
+
+        return try {
+            val result = withTimeout(environmentalTimeoutMillis) {
+                service.fetch(lat, lng)
+            }
+            when (result) {
+                is EnvironmentalFetchResult.Success ->
+                    EnvironmentalOutcome(result.snapshot, warning = null)
+                is EnvironmentalFetchResult.NoNetwork ->
+                    EnvironmentalOutcome(
+                        EnvironmentalSnapshot.EMPTY,
+                        warning = "No internet — saved without weather data.",
+                    )
+                is EnvironmentalFetchResult.Timeout ->
+                    EnvironmentalOutcome(
+                        EnvironmentalSnapshot.EMPTY,
+                        warning = "Weather service timed out — saved without it.",
+                    )
+                is EnvironmentalFetchResult.ApiError ->
+                    EnvironmentalOutcome(
+                        EnvironmentalSnapshot.EMPTY,
+                        warning = result.message,
+                    )
+            }
+        } catch (_: TimeoutCancellationException) {
+            // withTimeout fired before the service finished — this is the
+            // authoritative 5s SLA enforcement. The request is cancelled
+            // cooperatively; we map it to the same Timeout UX as a
+            // service-level timeout.
+            EnvironmentalOutcome(
+                EnvironmentalSnapshot.EMPTY,
+                warning = "Weather service timed out — saved without it.",
+            )
+        } catch (error: Exception) {
+            // Defensive catch-all — a mis-implemented service could throw
+            // something unexpected. We MUST NOT crash the save flow.
+            EnvironmentalOutcome(
+                EnvironmentalSnapshot.EMPTY,
+                warning = "Weather unavailable: ${error.message ?: "unexpected error"}",
+            )
         }
     }
 
@@ -355,6 +455,13 @@ class LogSymptomViewModel(
     }
 
     companion object {
+        /**
+         * Environmental fetch SLA enforced by `withTimeout(...)` in the save
+         * pipeline. Kept as a constant so tests can parameterise it without
+         * ambiguity about the production value.
+         */
+        const val ENVIRONMENTAL_FETCH_TIMEOUT_MILLIS: Long = 5_000L
+
         val Factory: ViewModelProvider.Factory = object : ViewModelProvider.Factory {
             @Suppress("UNCHECKED_CAST")
             override fun <T : ViewModel> create(modelClass: Class<T>, extras: CreationExtras): T {
@@ -363,6 +470,7 @@ class LogSymptomViewModel(
                     repository = app.container.symptomLogRepository,
                     locationProvider = app.container.locationProvider,
                     reverseGeocoder = app.container.reverseGeocoder,
+                    environmentalService = app.container.environmentalService,
                 ) as T
             }
         }
@@ -375,6 +483,7 @@ class LogSymptomViewModel(
                     repository = app.container.symptomLogRepository,
                     locationProvider = app.container.locationProvider,
                     reverseGeocoder = app.container.reverseGeocoder,
+                    environmentalService = app.container.environmentalService,
                     editingId = id,
                 ) as T
             }
@@ -397,4 +506,20 @@ private fun SymptomLog.toDraft(): LogDraft = LogDraft(
     locationLatitude = locationLatitude,
     locationLongitude = locationLongitude,
     locationName = locationName,
+    weatherCode = weatherCode,
+    weatherDescription = weatherDescription,
+    temperatureCelsius = temperatureCelsius,
+    humidityPercent = humidityPercent,
+    pressureHpa = pressureHpa,
+    airQualityIndex = airQualityIndex,
+)
+
+/** Reconstruct the snapshot from a draft for edit-mode save, without re-fetching. */
+private fun LogDraft.toSnapshot(): EnvironmentalSnapshot = EnvironmentalSnapshot(
+    weatherCode = weatherCode,
+    weatherDescription = weatherDescription,
+    temperatureCelsius = temperatureCelsius,
+    humidityPercent = humidityPercent,
+    pressureHpa = pressureHpa,
+    airQualityIndex = airQualityIndex,
 )

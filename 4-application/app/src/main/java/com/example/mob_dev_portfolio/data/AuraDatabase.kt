@@ -10,7 +10,7 @@ import net.zetetic.database.sqlcipher.SupportOpenHelperFactory
 
 @Database(
     entities = [SymptomLogEntity::class],
-    version = 3,
+    version = 4,
     exportSchema = false,
 )
 abstract class AuraDatabase : RoomDatabase() {
@@ -44,6 +44,23 @@ abstract class AuraDatabase : RoomDatabase() {
             }
         }
 
+        /**
+         * Adds nullable environmental metric columns for the Environmental Data
+         * Retrieval story. Every column is nullable because the API call is
+         * best-effort: timeouts, offline saves, and HTTP errors must all
+         * persist a row with null metrics rather than losing the symptom log.
+         */
+        val MIGRATION_3_4: Migration = object : Migration(3, 4) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                db.execSQL("ALTER TABLE symptom_logs ADD COLUMN weatherCode INTEGER")
+                db.execSQL("ALTER TABLE symptom_logs ADD COLUMN weatherDescription TEXT")
+                db.execSQL("ALTER TABLE symptom_logs ADD COLUMN temperatureCelsius REAL")
+                db.execSQL("ALTER TABLE symptom_logs ADD COLUMN humidityPercent INTEGER")
+                db.execSQL("ALTER TABLE symptom_logs ADD COLUMN pressureHpa REAL")
+                db.execSQL("ALTER TABLE symptom_logs ADD COLUMN airQualityIndex INTEGER")
+            }
+        }
+
         fun get(context: Context, passphrase: ByteArray): AuraDatabase =
             instance ?: synchronized(this) {
                 instance ?: Room.databaseBuilder(
@@ -52,7 +69,7 @@ abstract class AuraDatabase : RoomDatabase() {
                     "aura.db",
                 )
                     .openHelperFactory(SupportOpenHelperFactory(passphrase.copyOf()))
-                    .addMigrations(MIGRATION_1_2, MIGRATION_2_3)
+                    .addMigrations(MIGRATION_1_2, MIGRATION_2_3, MIGRATION_3_4)
                     .build()
                     .also { instance = it }
             }

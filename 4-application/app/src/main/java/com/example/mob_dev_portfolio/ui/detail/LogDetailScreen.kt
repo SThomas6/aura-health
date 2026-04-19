@@ -272,6 +272,35 @@ private fun DetailContent(
             )
         }
 
+        val envLines = buildEnvironmentalLines(log)
+        if (envLines.isNotEmpty()) {
+            Surface(
+                color = MaterialTheme.colorScheme.surfaceVariant,
+                contentColor = MaterialTheme.colorScheme.onSurfaceVariant,
+                shape = RoundedCornerShape(16.dp),
+                modifier = Modifier.fillMaxWidth(),
+            ) {
+                Column(
+                    modifier = Modifier
+                        .padding(16.dp)
+                        .testTag("detail_environment"),
+                    verticalArrangement = Arrangement.spacedBy(4.dp),
+                ) {
+                    Text(
+                        "Environmental conditions",
+                        style = MaterialTheme.typography.labelLarge,
+                    )
+                    envLines.forEach { (label, value) ->
+                        Text(
+                            "$label: $value",
+                            style = MaterialTheme.typography.bodyLarge,
+                            color = MaterialTheme.colorScheme.onSurface,
+                        )
+                    }
+                }
+            }
+        }
+
         Spacer(Modifier.height(8.dp))
 
         Button(
@@ -303,6 +332,31 @@ private fun DetailContent(
 
         Spacer(Modifier.height(12.dp))
     }
+}
+
+/**
+ * Build label → value pairs for whichever environmental fields are non-null
+ * on this log. A log with no location (and therefore no fetch) produces an
+ * empty list and the environment card is hidden altogether.
+ */
+private fun buildEnvironmentalLines(log: SymptomLog): List<Pair<String, String>> {
+    val lines = mutableListOf<Pair<String, String>>()
+    log.weatherDescription?.takeIf { it.isNotBlank() }?.let {
+        lines += "Weather" to it
+    }
+    log.temperatureCelsius?.let {
+        lines += "Temperature" to "${"%.1f".format(it)} °C"
+    }
+    log.humidityPercent?.let {
+        lines += "Humidity" to "$it%"
+    }
+    log.pressureHpa?.let {
+        lines += "Pressure" to "${"%.1f".format(it)} hPa"
+    }
+    log.airQualityIndex?.let {
+        lines += "Air quality (EAQI)" to it.toString()
+    }
+    return lines
 }
 
 @Composable

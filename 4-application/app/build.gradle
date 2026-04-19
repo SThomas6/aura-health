@@ -99,9 +99,16 @@ dependencies {
 
     implementation 'com.google.android.gms:play-services-location:21.3.0'
 
+    implementation 'com.squareup.okhttp3:okhttp:4.12.0'
+
     testImplementation 'junit:junit:4.13.2'
     testImplementation 'org.jetbrains.kotlinx:kotlinx-coroutines-test:1.8.1'
     testImplementation 'androidx.arch.core:core-testing:2.2.0'
+    testImplementation 'com.squareup.okhttp3:mockwebserver:4.12.0'
+    // Real JSONObject impl for unit tests — Android's shipped stub returns
+    // default values and cannot parse real JSON. This does not ship with the
+    // app itself; at runtime the platform class is used.
+    testImplementation 'org.json:json:20240303'
 
     androidTestImplementation 'androidx.test.ext:junit:1.3.0'
     androidTestImplementation 'androidx.test.espresso:espresso-core:3.7.0'
