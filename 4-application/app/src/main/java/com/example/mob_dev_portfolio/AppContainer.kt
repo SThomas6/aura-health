@@ -8,6 +8,8 @@ import androidx.datastore.preferences.preferencesDataStore
 import com.example.mob_dev_portfolio.data.AuraDatabase
 import com.example.mob_dev_portfolio.data.SymptomLogEntity
 import com.example.mob_dev_portfolio.data.SymptomLogRepository
+import com.example.mob_dev_portfolio.data.environment.EnvironmentalService
+import com.example.mob_dev_portfolio.data.environment.OpenMeteoEnvironmentalService
 import com.example.mob_dev_portfolio.data.location.AndroidGeocoder
 import com.example.mob_dev_portfolio.data.location.FusedLocationProvider
 import com.example.mob_dev_portfolio.data.location.LocationProvider
@@ -27,6 +29,7 @@ interface AppContainer {
     val uiPreferencesRepository: UiPreferencesRepository
     val locationProvider: LocationProvider
     val reverseGeocoder: ReverseGeocoder
+    val environmentalService: EnvironmentalService
 }
 
 class DefaultAppContainer(
@@ -88,6 +91,10 @@ class DefaultAppContainer(
 
     override val reverseGeocoder: ReverseGeocoder by lazy {
         AndroidGeocoder(appContext)
+    }
+
+    override val environmentalService: EnvironmentalService by lazy {
+        OpenMeteoEnvironmentalService()
     }
 
     companion object {
