@@ -11,6 +11,20 @@ data class LogDraft(
     val contextTags: Set<String> = emptySet(),
     val notes: String = "",
     val createdAtEpochMillis: Long = System.currentTimeMillis(),
+    /** Whether the user has opted to attach their approximate location on save. */
+    val attachLocation: Boolean = false,
+    /**
+     * Rounded latitude captured during a previous save (present only when
+     * editing an existing log). Never populated from live GPS in the draft —
+     * location is fetched at save time.
+     */
+    val locationLatitude: Double? = null,
+    val locationLongitude: Double? = null,
+    /**
+     * Human-readable place string populated by reverse geocoding at save time.
+     * Pre-populated from the DB when editing; never derived in the UI.
+     */
+    val locationName: String? = null,
 )
 
 enum class LogField { SymptomName, Description, StartDateTime, EndDateTime, Severity }

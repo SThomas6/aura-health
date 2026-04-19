@@ -15,4 +15,7 @@ data class SymptomLogEntity(
     val contextTags: String,
     val notes: String,
     val createdAtEpochMillis: Long,
+    val locationLatitude: Double? = null,
+    val locationLongitude: Double? = null,
+    val locationName: String? = null,
 )

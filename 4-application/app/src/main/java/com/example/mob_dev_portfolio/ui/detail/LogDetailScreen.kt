@@ -261,6 +261,16 @@ private fun DetailContent(
         if (log.notes.isNotBlank()) {
             DetailRow(label = "Notes", value = log.notes, testTag = "detail_notes")
         }
+        if (log.locationLatitude != null && log.locationLongitude != null) {
+            // Raw coordinates are intentionally NOT rendered — we show only the
+            // pre-computed place name. If the DB row is null (pre-migration or
+            // failed geocoding), the "Location unavailable" fallback is shown.
+            DetailRow(
+                label = "Approximate location",
+                value = log.locationName?.takeIf { it.isNotBlank() } ?: "Location unavailable",
+                testTag = "detail_location",
+            )
+        }
 
         Spacer(Modifier.height(8.dp))
 
