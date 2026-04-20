@@ -44,6 +44,14 @@ data object AnalysisRunnerRoute
 @Serializable
 data class AnalysisDetailRoute(val runId: Long)
 
+/**
+ * Route for the "Generate a PDF health report" feature. Reached from
+ * a Home-screen quick-action card; lives outside the top-level nav so
+ * the existing four tabs stay untouched.
+ */
+@Serializable
+data object HealthReportRoute
+
 data class TopLevelDestination(
     val route: TopLevelRoute,
     val label: String,

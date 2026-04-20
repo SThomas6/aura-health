@@ -68,6 +68,14 @@ interface AnalysisRunDao {
     @Query("SELECT * FROM analysis_runs ORDER BY completedAtEpochMillis DESC LIMIT 1")
     suspend fun latest(): AnalysisRunEntity?
 
+    /**
+     * One-shot oldest-first dump used by the PDF report builder so the
+     * generated document reads as a chronological journal (symptom logs
+     * + AI insights) rather than in "most recent first" UI order.
+     */
+    @Query("SELECT * FROM analysis_runs ORDER BY completedAtEpochMillis ASC")
+    suspend fun listChronologicalAsc(): List<AnalysisRunEntity>
+
     /** Cross-refs for a given run, used by the detail screen for the "N logs analysed" line. */
     @Query("SELECT logId FROM analysis_run_logs WHERE runId = :runId")
     fun observeLogIdsFor(runId: Long): Flow<List<Long>>

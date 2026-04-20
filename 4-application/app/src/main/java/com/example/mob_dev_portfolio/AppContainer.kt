@@ -28,6 +28,8 @@ import com.example.mob_dev_portfolio.data.location.LocationProvider
 import com.example.mob_dev_portfolio.data.location.ReverseGeocoder
 import com.example.mob_dev_portfolio.data.preferences.UiPreferencesRepository
 import com.example.mob_dev_portfolio.data.preferences.UserProfileRepository
+import com.example.mob_dev_portfolio.data.report.HealthReportPdfGenerator
+import com.example.mob_dev_portfolio.data.report.ReportRepository
 import com.example.mob_dev_portfolio.data.security.DatabasePassphraseProvider
 import com.example.mob_dev_portfolio.data.security.PassphraseOutcome
 import com.example.mob_dev_portfolio.data.security.PlaintextDatabaseMigrator
@@ -78,6 +80,17 @@ interface AppContainer {
      * subscribes and routes to the Analysis destination.
      */
     val deepLinkEvents: DeepLinkEvents
+
+    /**
+     * Offline health-report generator. Aggregates symptom logs + AI
+     * analysis history into a structured PDF using Android's native
+     * [android.graphics.pdf.PdfDocument] — no network, no third-party
+     * library.
+     */
+    val reportRepository: ReportRepository
+
+    /** Native [android.graphics.pdf.PdfDocument]-backed report writer. */
+    val healthReportPdfGenerator: HealthReportPdfGenerator
 }
 
 class DefaultAppContainer(
@@ -190,6 +203,17 @@ class DefaultAppContainer(
     }
 
     override val deepLinkEvents: DeepLinkEvents by lazy { DeepLinkEvents() }
+
+    override val reportRepository: ReportRepository by lazy {
+        ReportRepository(
+            symptomLogDao = database.symptomLogDao(),
+            analysisRunDao = database.analysisRunDao(),
+        )
+    }
+
+    override val healthReportPdfGenerator: HealthReportPdfGenerator by lazy {
+        HealthReportPdfGenerator(context = appContext)
+    }
 
     companion object {
         private const val TAG = "AppContainer"
