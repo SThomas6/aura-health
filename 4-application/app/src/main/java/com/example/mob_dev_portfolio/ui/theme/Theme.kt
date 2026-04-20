@@ -34,6 +34,13 @@ private val LightScheme = lightColorScheme(
     onSurface = AuraOnSurface,
     surfaceVariant = AuraSurfaceVariant,
     onSurfaceVariant = AuraOnSurfaceVariant,
+    outline = AuraOutline,
+    outlineVariant = AuraOutlineVariant,
+    surfaceContainerLowest = AuraSurfaceContainerLowest,
+    surfaceContainerLow = AuraSurfaceContainerLow,
+    surfaceContainer = AuraSurfaceContainer,
+    surfaceContainerHigh = AuraSurfaceContainerHigh,
+    surfaceContainerHighest = AuraSurfaceContainerHighest,
 )
 
 private val DarkScheme = darkColorScheme(
@@ -49,22 +56,36 @@ private val DarkScheme = darkColorScheme(
     onTertiary = AuraOnTertiaryDark,
     tertiaryContainer = AuraTertiaryContainerDark,
     onTertiaryContainer = AuraOnTertiaryContainerDark,
-    error = AuraError,
-    onError = AuraOnError,
-    errorContainer = AuraErrorContainer,
-    onErrorContainer = AuraOnErrorContainer,
+    error = AuraErrorDark,
+    onError = AuraOnErrorDark,
+    errorContainer = AuraErrorContainerDark,
+    onErrorContainer = AuraOnErrorContainerDark,
     background = AuraBackgroundDark,
     onBackground = AuraOnBackgroundDark,
     surface = AuraSurfaceDark,
     onSurface = AuraOnSurfaceDark,
     surfaceVariant = AuraSurfaceVariantDark,
     onSurfaceVariant = AuraOnSurfaceVariantDark,
+    outline = AuraOutlineDark,
+    outlineVariant = AuraOutlineVariantDark,
+    surfaceContainerLowest = AuraSurfaceContainerLowestDark,
+    surfaceContainerLow = AuraSurfaceContainerLowDark,
+    surfaceContainer = AuraSurfaceContainerDark,
+    surfaceContainerHigh = AuraSurfaceContainerHighDark,
+    surfaceContainerHighest = AuraSurfaceContainerHighestDark,
 )
 
+/**
+ * Applies the Aura mint-clinical theme.
+ *
+ * `dynamicColor` defaults to **off** so the designed palette is what ships
+ * by default. Users who prefer the Android 12+ wallpaper-tinted look can
+ * still opt in from a future settings entry — the plumbing is preserved.
+ */
 @Composable
 fun AuraTheme(
     themeMode: ThemeMode = ThemeMode.System,
-    dynamicColor: Boolean = true,
+    dynamicColor: Boolean = false,
     content: @Composable () -> Unit,
 ) {
     val darkTheme = when (themeMode) {
@@ -83,6 +104,7 @@ fun AuraTheme(
     MaterialTheme(
         colorScheme = scheme,
         typography = AuraTypography,
+        shapes = AuraShapes,
         content = content,
     )
 }

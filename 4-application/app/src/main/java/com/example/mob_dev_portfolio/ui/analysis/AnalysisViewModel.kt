@@ -4,21 +4,21 @@ import androidx.lifecycle.ViewModel
 import androidx.lifecycle.ViewModelProvider
 import androidx.lifecycle.viewModelScope
 import androidx.lifecycle.viewmodel.CreationExtras
+import androidx.work.WorkInfo
 import com.example.mob_dev_portfolio.AuraApplication
-import com.example.mob_dev_portfolio.data.SymptomLogRepository
-import com.example.mob_dev_portfolio.data.ai.AnalysisResult
-import com.example.mob_dev_portfolio.data.ai.AnalysisService
+import com.example.mob_dev_portfolio.data.ai.AnalysisGuidance
+import com.example.mob_dev_portfolio.data.ai.AnalysisResultStore
 import com.example.mob_dev_portfolio.data.ai.NetworkConnectivity
+import com.example.mob_dev_portfolio.data.ai.StoredAnalysis
 import com.example.mob_dev_portfolio.data.preferences.UserProfile
 import com.example.mob_dev_portfolio.data.preferences.UserProfileRepository
-import kotlinx.coroutines.CoroutineDispatcher
-import kotlinx.coroutines.Dispatchers
+import com.example.mob_dev_portfolio.work.AnalysisScheduler
+import com.example.mob_dev_portfolio.work.AnalysisWorker
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
-import kotlinx.coroutines.withContext
 
 /**
  * States the analysis screen can be in.
@@ -29,7 +29,11 @@ import kotlinx.coroutines.withContext
 sealed interface AnalysisPhase {
     data object Idle : AnalysisPhase
     data object Loading : AnalysisPhase
-    data class Success(val summaryText: String) : AnalysisPhase
+    data class Success(
+        val summaryText: String,
+        val guidance: AnalysisGuidance,
+        val completedAtEpochMillis: Long,
+    ) : AnalysisPhase
 }
 
 data class AnalysisUiState(
@@ -58,10 +62,9 @@ data class AnalysisUiState(
 
 class AnalysisViewModel(
     private val profileRepository: UserProfileRepository,
-    private val logRepository: SymptomLogRepository,
-    private val analysisService: AnalysisService,
+    private val resultStore: AnalysisResultStore,
+    private val scheduler: AnalysisScheduler,
     private val connectivity: NetworkConnectivity,
-    private val ioDispatcher: CoroutineDispatcher = Dispatchers.Default,
 ) : ViewModel() {
 
     private val _state = MutableStateFlow(AnalysisUiState())
@@ -79,6 +82,67 @@ class AnalysisViewModel(
                     fullName = initial.fullName.orEmpty(),
                     dobEpochMillis = initial.dateOfBirthEpochMillis,
                 )
+            }
+        }
+
+        // Observe the result store: whenever a worker completes a successful
+        // analysis, paint it into the Success phase so a user returning from
+        // the notification tap (or simply re-opening the app) sees the
+        // summary without having to re-run.
+        viewModelScope.launch {
+            resultStore.latest.collect { stored ->
+                if (stored != null) {
+                    _state.update { current ->
+                        // Don't stomp Loading: if a worker is still running,
+                        // the previous stored summary is stale; let
+                        // the WorkInfo observer own the phase until the
+                        // worker completes and re-writes the store.
+                        if (current.phase is AnalysisPhase.Loading) current
+                        else current.copy(phase = stored.toSuccess())
+                    }
+                }
+            }
+        }
+
+        // Observe the unique worker's state stream. RUNNING / ENQUEUED map
+        // to Loading; terminal states are handled by the store observer
+        // above (success) or by the failure mapping here (failure).
+        viewModelScope.launch {
+            scheduler.currentWorkInfos().collect { infos ->
+                val latest = infos.maxByOrNull { it.runAttemptCount } ?: return@collect
+                when (latest.state) {
+                    WorkInfo.State.ENQUEUED,
+                    WorkInfo.State.RUNNING,
+                    WorkInfo.State.BLOCKED,
+                    -> _state.update { it.copy(phase = AnalysisPhase.Loading) }
+
+                    WorkInfo.State.FAILED -> {
+                        val message = failureMessageFrom(latest)
+                        _state.update { current ->
+                            current.copy(
+                                phase = if (current.phase is AnalysisPhase.Loading) AnalysisPhase.Idle else current.phase,
+                                transientError = message,
+                            )
+                        }
+                    }
+
+                    WorkInfo.State.SUCCEEDED,
+                    WorkInfo.State.CANCELLED,
+                    -> {
+                        // SUCCEEDED is handled by the store observer; we
+                        // only care to drop Loading if we're still showing
+                        // it (edge case: store emission arrived first but
+                        // we were in Loading and got blocked).
+                        if (_state.value.phase is AnalysisPhase.Loading) {
+                            val stored = runCatching { resultStore.latest.first() }.getOrNull()
+                            _state.update {
+                                it.copy(
+                                    phase = stored?.toSuccess() ?: AnalysisPhase.Idle,
+                                )
+                            }
+                        }
+                    }
+                }
             }
         }
     }
@@ -104,21 +168,22 @@ class AnalysisViewModel(
     }
 
     /**
-     * Kicks off an analysis.
+     * Enqueues a background [AnalysisWorker].
      *
-     * **Offline guard (AC):** we check connectivity BEFORE touching OkHttp
-     * so the "no network" path is free of any socket activity. This is the
-     * path asserted by the ViewModel unit test — the fake client's call
-     * counter must stay at zero when connectivity is false.
+     * **Offline guard (AC):** we check connectivity BEFORE scheduling so
+     * the "no network" path is free of any WorkManager activity. The worker
+     * itself re-checks at start — if the user came back online between tap
+     * and worker start, the retry still runs — but this fast-path gives us
+     * an immediate snackbar without waiting for the worker to spin up.
      *
-     * Once the guard passes we flip to [AnalysisPhase.Loading] synchronously
-     * (on the caller's dispatcher) so the UI's loading indicator appears in
-     * the same frame as the tap. The actual analysis work happens on
-     * [ioDispatcher].
+     * The actual analysis happens in a OS-managed coroutine and survives
+     * the app being backgrounded or killed.
      */
     fun triggerAnalysis() {
         if (_state.value.phase is AnalysisPhase.Loading) {
-            // Double-tap guard — don't kick off two in parallel.
+            // Double-tap guard — don't kick off two in parallel. REPLACE
+            // policy on the scheduler would handle this safely anyway, but
+            // suppressing here keeps the Loading indicator steady.
             return
         }
         if (!connectivity.isOnline()) {
@@ -127,41 +192,33 @@ class AnalysisViewModel(
             }
             return
         }
+        // Paint Loading immediately. The WorkInfo observer will reconcile
+        // once WorkManager picks up our request.
         _state.update { it.copy(phase = AnalysisPhase.Loading, transientError = null) }
-        viewModelScope.launch {
-            val snapshot = _state.value
-            val profile = UserProfile(
-                fullName = snapshot.fullName.takeIf { it.isNotBlank() },
-                dateOfBirthEpochMillis = snapshot.dobEpochMillis,
-            )
-            val logs = runCatching { logRepository.observeAll().first() }.getOrDefault(emptyList())
-            val result = withContext(ioDispatcher) {
-                analysisService.analyze(profile, snapshot.userContext, logs)
-            }
-            _state.update { current ->
-                when (result) {
-                    is AnalysisResult.Success -> current.copy(
-                        phase = AnalysisPhase.Success(result.summaryText),
-                        transientError = null,
-                    )
-                    is AnalysisResult.NoNetwork -> current.copy(
-                        phase = AnalysisPhase.Idle,
-                        transientError = "Lost connection before we heard back — try again.",
-                    )
-                    is AnalysisResult.Timeout -> current.copy(
-                        phase = AnalysisPhase.Idle,
-                        transientError = "AI took too long to respond — try again.",
-                    )
-                    is AnalysisResult.ApiError -> current.copy(
-                        phase = AnalysisPhase.Idle,
-                        transientError = result.message,
-                    )
-                }
-            }
+        scheduler.enqueue(_state.value.userContext)
+    }
+
+    private fun failureMessageFrom(info: WorkInfo): String {
+        val kind = info.outputData.getString(AnalysisWorker.KEY_FAILURE_KIND)
+        val message = info.outputData.getString(AnalysisWorker.KEY_FAILURE_MESSAGE)
+        return when (kind) {
+            AnalysisWorker.FAILURE_TIMEOUT -> "AI took too long to respond — try again."
+            AnalysisWorker.FAILURE_NO_NETWORK -> "Lost connection before we heard back — try again."
+            AnalysisWorker.FAILURE_API_ERROR -> message ?: "AI analysis failed — try again."
+            else -> "Analysis couldn't finish — try again."
         }
     }
 
-    private inline fun MutableStateFlow<AnalysisUiState>.update(transform: (AnalysisUiState) -> AnalysisUiState) {
+    private fun StoredAnalysis.toSuccess(): AnalysisPhase.Success =
+        AnalysisPhase.Success(
+            summaryText = summaryText,
+            guidance = guidance,
+            completedAtEpochMillis = completedAtEpochMillis,
+        )
+
+    private inline fun MutableStateFlow<AnalysisUiState>.update(
+        transform: (AnalysisUiState) -> AnalysisUiState,
+    ) {
         value = transform(value)
     }
 
@@ -172,8 +229,8 @@ class AnalysisViewModel(
                 val app = extras[ViewModelProvider.AndroidViewModelFactory.APPLICATION_KEY] as AuraApplication
                 return AnalysisViewModel(
                     profileRepository = app.container.userProfileRepository,
-                    logRepository = app.container.symptomLogRepository,
-                    analysisService = app.container.analysisService,
+                    resultStore = app.container.analysisResultStore,
+                    scheduler = app.container.analysisScheduler,
                     connectivity = app.container.networkConnectivity,
                 ) as T
             }
