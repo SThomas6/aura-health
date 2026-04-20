@@ -168,15 +168,40 @@ private class PdfRenderSession(
     context: Context,
     file: File,
 ) {
-    private val fd: ParcelFileDescriptor =
-        ParcelFileDescriptor.open(file, ParcelFileDescriptor.MODE_READ_ONLY)
-    private val renderer: PdfRenderer = PdfRenderer(fd)
+    // Open the descriptor + renderer defensively. A corrupt or missing
+    // PDF on disk (e.g. cache evicted, mid-write crash last run) would
+    // otherwise throw IOException synchronously during composition and
+    // crash the UI. We capture the failure instead and expose a session
+    // with zero pages so the screen renders an "empty preview" hint.
+    private val fd: ParcelFileDescriptor?
+    private val renderer: PdfRenderer?
     private val lock = Any()
     private var closed = false
 
-    val pageCount: Int = renderer.pageCount
+    val pageCount: Int
 
-    private val metaCache = arrayOfNulls<PageMeta>(pageCount)
+    private val metaCache: Array<PageMeta?>
+
+    init {
+        var openedFd: ParcelFileDescriptor? = null
+        var openedRenderer: PdfRenderer? = null
+        try {
+            openedFd = ParcelFileDescriptor.open(file, ParcelFileDescriptor.MODE_READ_ONLY)
+            openedRenderer = PdfRenderer(openedFd)
+        } catch (t: Throwable) {
+            // Roll back any partially-acquired resources so we don't
+            // leak a file descriptor when the PdfRenderer constructor
+            // fails after the fd has been opened.
+            runCatching { openedRenderer?.close() }
+            runCatching { openedFd?.close() }
+            openedFd = null
+            openedRenderer = null
+        }
+        fd = openedFd
+        renderer = openedRenderer
+        pageCount = openedRenderer?.pageCount ?: 0
+        metaCache = arrayOfNulls(pageCount)
+    }
 
     init {
         // Touch the context so lint doesn't flag it unused — keeping
@@ -185,12 +210,13 @@ private class PdfRenderSession(
     }
 
     fun pageMeta(pageIndex: Int): PageMeta? {
+        val r = renderer ?: return null
         if (pageIndex !in 0 until pageCount) return null
         metaCache[pageIndex]?.let { return it }
         synchronized(lock) {
             if (closed) return null
             metaCache[pageIndex]?.let { return it }
-            val page = renderer.openPage(pageIndex)
+            val page = r.openPage(pageIndex)
             val meta = PageMeta(widthPt = page.width, heightPt = page.height)
             page.close()
             metaCache[pageIndex] = meta
@@ -199,10 +225,11 @@ private class PdfRenderSession(
     }
 
     fun renderPage(pageIndex: Int, targetWidthPx: Int): Bitmap? {
+        val r = renderer ?: return null
         if (pageIndex !in 0 until pageCount) return null
         synchronized(lock) {
             if (closed) return null
-            val page = renderer.openPage(pageIndex)
+            val page = r.openPage(pageIndex)
             // Scale the bitmap so the page renders at the current
             // layout width, preserving aspect. We cap height to avoid
             // an OOM on absurdly narrow screens (aspect × width).
@@ -232,8 +259,8 @@ private class PdfRenderSession(
         synchronized(lock) {
             if (closed) return
             closed = true
-            runCatching { renderer.close() }
-            runCatching { fd.close() }
+            runCatching { renderer?.close() }
+            runCatching { fd?.close() }
         }
     }
 }

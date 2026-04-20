@@ -1,5 +1,11 @@
 package com.example.mob_dev_portfolio.ui.analysis
 
+import android.Manifest
+import android.content.pm.PackageManager
+import android.os.Build
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
+import androidx.core.content.ContextCompat
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -45,6 +51,7 @@ import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
@@ -64,6 +71,7 @@ fun AnalysisScreen(
 ) {
     val state by viewModel.state.collectAsStateWithLifecycle()
     val snackbarHost = remember { SnackbarHostState() }
+    val context = LocalContext.current
 
     // Transient errors (offline, timeout, API error) all route through the
     // same Snackbar so the UI stays non-blocking — consistent with the
@@ -72,6 +80,38 @@ fun AnalysisScreen(
         state.transientError?.let { message ->
             snackbarHost.showSnackbar(message)
             viewModel.onTransientErrorShown()
+        }
+    }
+
+    // POST_NOTIFICATIONS runtime permission gate. The notification
+    // itself is what delivers the analysis result once the worker
+    // finishes; if the user declines we still run the analysis and
+    // they can read it in-app, but we ask here — right before the
+    // background work is enqueued — because that's exactly when the
+    // system-guidance "ask in context" pattern applies.
+    //
+    // API 32 and below don't require the runtime grant (it's auto-
+    // granted at install), so we short-circuit to the trigger.
+    val notificationLauncher = rememberLauncherForActivityResult(
+        ActivityResultContracts.RequestPermission(),
+    ) {
+        // Regardless of the user's answer we still fire the analysis:
+        // the notification is a convenience, not a prerequisite, and
+        // the result also lands in the in-app history.
+        viewModel.triggerAnalysis()
+    }
+    val triggerWithPermission: () -> Unit = remember(context) {
+        {
+            val needsRuntimeGrant = Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU
+            val alreadyGranted = !needsRuntimeGrant || ContextCompat.checkSelfPermission(
+                context,
+                Manifest.permission.POST_NOTIFICATIONS,
+            ) == PackageManager.PERMISSION_GRANTED
+            if (alreadyGranted) {
+                viewModel.triggerAnalysis()
+            } else {
+                notificationLauncher.launch(Manifest.permission.POST_NOTIFICATIONS)
+            }
         }
     }
 
@@ -101,7 +141,7 @@ fun AnalysisScreen(
             )
             TriggerRow(
                 phase = state.phase,
-                onTrigger = viewModel::triggerAnalysis,
+                onTrigger = triggerWithPermission,
             )
             AnalysisResultArea(phase = state.phase)
         }

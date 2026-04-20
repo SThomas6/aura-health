@@ -29,6 +29,7 @@ import com.example.mob_dev_portfolio.data.location.ReverseGeocoder
 import com.example.mob_dev_portfolio.data.preferences.UiPreferencesRepository
 import com.example.mob_dev_portfolio.data.preferences.UserProfileRepository
 import com.example.mob_dev_portfolio.data.report.HealthReportPdfGenerator
+import com.example.mob_dev_portfolio.data.report.ReportArchiveRepository
 import com.example.mob_dev_portfolio.data.report.ReportRepository
 import com.example.mob_dev_portfolio.data.security.DatabasePassphraseProvider
 import com.example.mob_dev_portfolio.data.security.PassphraseOutcome
@@ -91,6 +92,13 @@ interface AppContainer {
 
     /** Native [android.graphics.pdf.PdfDocument]-backed report writer. */
     val healthReportPdfGenerator: HealthReportPdfGenerator
+
+    /**
+     * Room-backed index of every generated PDF report, paired with
+     * the compressed files on disk. Backs the history screen and
+     * drives the two-step (file-first, row-second) delete contract.
+     */
+    val reportArchiveRepository: ReportArchiveRepository
 }
 
 class DefaultAppContainer(
@@ -213,6 +221,13 @@ class DefaultAppContainer(
 
     override val healthReportPdfGenerator: HealthReportPdfGenerator by lazy {
         HealthReportPdfGenerator(context = appContext)
+    }
+
+    override val reportArchiveRepository: ReportArchiveRepository by lazy {
+        ReportArchiveRepository(
+            dao = database.reportArchiveDao(),
+            pdfGenerator = healthReportPdfGenerator,
+        )
     }
 
     companion object {
