@@ -7,10 +7,12 @@ import androidx.compose.foundation.layout.ExperimentalLayoutApi
 import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.heightIn
+import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.sizeIn
@@ -64,6 +66,8 @@ import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewmodel.compose.viewModel
 import com.example.mob_dev_portfolio.data.SymptomLog
+import com.example.mob_dev_portfolio.ui.components.SeverityEdge
+import com.example.mob_dev_portfolio.ui.components.SeverityPill
 import com.example.mob_dev_portfolio.ui.log.LogValidator
 import java.time.Instant
 import java.time.LocalDate
@@ -610,72 +614,91 @@ private fun NoMatchesState(onClearFilters: () -> Unit, modifier: Modifier = Modi
 private fun LogCard(log: SymptomLog, onClick: () -> Unit) {
     val zone = ZoneId.systemDefault()
     val start = Instant.ofEpochMilli(log.startEpochMillis).atZone(zone).toLocalDateTime()
-    Card(
+    // Surface (not Card) so the severity edge can sit flush on the left
+    // without fighting the Card's internal padding and elevation shadow.
+    Surface(
         onClick = onClick,
-        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant),
+        color = MaterialTheme.colorScheme.surface,
+        contentColor = MaterialTheme.colorScheme.onSurface,
+        tonalElevation = 0.dp,
         shape = RoundedCornerShape(20.dp),
+        border = androidx.compose.foundation.BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant),
         modifier = Modifier
             .fillMaxWidth()
             .heightIn(min = 72.dp)
             .testTag("history_row_${log.id}"),
     ) {
-        Column(modifier = Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                Column(modifier = Modifier.weight(1f)) {
-                    Text(log.symptomName, style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold)
+        Row(modifier = Modifier.fillMaxWidth()) {
+            SeverityEdge(
+                severity = log.severity,
+                modifier = Modifier
+                    .width(4.dp)
+                    .padding(vertical = 10.dp)
+                    .fillMaxHeight(),
+            )
+            Column(
+                modifier = Modifier
+                    .padding(start = 14.dp, top = 14.dp, end = 14.dp, bottom = 14.dp)
+                    .fillMaxWidth(),
+                verticalArrangement = Arrangement.spacedBy(8.dp),
+            ) {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Column(modifier = Modifier.weight(1f)) {
+                        Text(log.symptomName, style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold)
+                        Text(
+                            start.format(DateTimeFormat),
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            fontFamily = com.example.mob_dev_portfolio.ui.theme.AuraMonoFamily,
+                        )
+                    }
+                    SeverityPill(severity = log.severity)
+                    Spacer(Modifier.width(6.dp))
+                    Icon(
+                        Icons.AutoMirrored.Filled.KeyboardArrowRight,
+                        contentDescription = null,
+                        tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                }
+                if (log.description.isNotBlank()) {
                     Text(
-                        start.format(DateTimeFormat),
+                        log.description,
+                        style = MaterialTheme.typography.bodyMedium,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                }
+                if (log.contextTags.isNotEmpty()) {
+                    FlowRow(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                        log.contextTags.forEach { tag ->
+                            TagChip(tag)
+                        }
+                    }
+                }
+                if (log.medication.isNotBlank()) {
+                    Text(
+                        "Medication: ${log.medication}",
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                     )
                 }
-                SeverityPill(severity = log.severity)
-                Icon(
-                    Icons.AutoMirrored.Filled.KeyboardArrowRight,
-                    contentDescription = null,
-                    tint = MaterialTheme.colorScheme.onSurfaceVariant,
-                )
-            }
-            if (log.description.isNotBlank()) {
-                Text(log.description, style = MaterialTheme.typography.bodyMedium)
-            }
-            if (log.contextTags.isNotEmpty()) {
-                FlowRow(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                    log.contextTags.forEach { tag ->
-                        AssistChip(onClick = {}, label = { Text(tag) }, enabled = false)
-                    }
-                }
-            }
-            if (log.medication.isNotBlank()) {
-                Text("Medication: ${log.medication}", style = MaterialTheme.typography.bodySmall)
             }
         }
     }
 }
 
+/** Compact read-only tag chip. Used inline on history cards. */
 @Composable
-private fun SeverityPill(severity: Int) {
-    val color = when {
-        severity <= 3 -> MaterialTheme.colorScheme.tertiaryContainer
-        severity <= 7 -> MaterialTheme.colorScheme.secondaryContainer
-        else -> MaterialTheme.colorScheme.errorContainer
-    }
-    val onColor = when {
-        severity <= 3 -> MaterialTheme.colorScheme.onTertiaryContainer
-        severity <= 7 -> MaterialTheme.colorScheme.onSecondaryContainer
-        else -> MaterialTheme.colorScheme.onErrorContainer
-    }
+private fun TagChip(label: String) {
     Surface(
-        color = color,
-        contentColor = onColor,
-        shape = RoundedCornerShape(100),
-        modifier = Modifier.padding(end = 4.dp),
+        color = MaterialTheme.colorScheme.surfaceContainerHigh,
+        contentColor = MaterialTheme.colorScheme.onSurface,
+        shape = RoundedCornerShape(999.dp),
     ) {
         Text(
-            text = "$severity/10",
+            text = label,
             modifier = Modifier.padding(horizontal = 10.dp, vertical = 4.dp),
-            style = MaterialTheme.typography.labelLarge,
-            fontWeight = FontWeight.SemiBold,
+            style = MaterialTheme.typography.labelMedium,
+            fontWeight = FontWeight.Medium,
         )
     }
 }

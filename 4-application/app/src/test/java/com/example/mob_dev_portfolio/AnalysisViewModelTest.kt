@@ -3,25 +3,23 @@ package com.example.mob_dev_portfolio
 import androidx.datastore.core.DataStore
 import androidx.datastore.preferences.core.Preferences
 import androidx.datastore.preferences.core.mutablePreferencesOf
-import com.example.mob_dev_portfolio.data.SymptomLog
-import com.example.mob_dev_portfolio.data.SymptomLogDao
-import com.example.mob_dev_portfolio.data.SymptomLogEntity
-import com.example.mob_dev_portfolio.data.SymptomLogRepository
-import com.example.mob_dev_portfolio.data.ai.AnalysisRequest
-import com.example.mob_dev_portfolio.data.ai.AnalysisResult
-import com.example.mob_dev_portfolio.data.ai.AnalysisService
-import com.example.mob_dev_portfolio.data.ai.GeminiClient
+import androidx.work.Data
+import androidx.work.WorkInfo
+import com.example.mob_dev_portfolio.data.ai.AnalysisGuidance
+import com.example.mob_dev_portfolio.data.ai.AnalysisResultStore
+import com.example.mob_dev_portfolio.data.ai.StoredAnalysis
 import com.example.mob_dev_portfolio.data.preferences.UserProfile
 import com.example.mob_dev_portfolio.data.preferences.UserProfileRepository
 import com.example.mob_dev_portfolio.ui.analysis.AnalysisPhase
 import com.example.mob_dev_portfolio.ui.analysis.AnalysisViewModel
+import com.example.mob_dev_portfolio.work.AnalysisScheduler
+import com.example.mob_dev_portfolio.work.AnalysisWorker
+import java.util.UUID
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.ExperimentalCoroutinesApi
-import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.asStateFlow
-import kotlinx.coroutines.flow.flowOf
 import kotlinx.coroutines.test.StandardTestDispatcher
 import kotlinx.coroutines.test.resetMain
 import kotlinx.coroutines.test.runTest
@@ -36,14 +34,21 @@ import org.junit.Before
 import org.junit.Test
 
 /**
- * Covers the ViewModel contract for the Analysis screen.
+ * Covers the ViewModel contract for the Analysis screen after the switch to
+ * WorkManager.
  *
- * The most important test in this file is [offline_tap_does_not_fire_request]
- * — that's the one pinned by the story's acceptance criterion: "tapping the
- * trigger button while offline immediately shows a non-blocking 'no network'
- * error". We verify the AnalysisService was NOT called at all, rather than
- * just that an error message appeared, so we know the short-circuit happens
- * before any network work is queued.
+ * Two tests matter most for the background-ai-processing story:
+ *   - [offline_tap_does_not_enqueue_work] — pins the "offline guard runs
+ *     before any WorkManager activity" behaviour. The scheduler's enqueue
+ *     counter must stay at zero, mirroring the earlier acceptance criterion
+ *     but against the new seam.
+ *   - [failed_work_surfaces_transient_error] — verifies that a failure
+ *     flowing back via WorkInfo.outputData is decoded into the friendly
+ *     snackbar copy a user sees while the screen is in the foreground.
+ *
+ * The happy "work succeeds, result appears" path is also covered: we feed
+ * the store a [StoredAnalysis] (as the worker would) and assert the phase
+ * moves to [AnalysisPhase.Success].
  */
 @OptIn(ExperimentalCoroutinesApi::class)
 class AnalysisViewModelTest {
@@ -61,106 +66,142 @@ class AnalysisViewModelTest {
     }
 
     @Test
-    fun offline_tap_does_not_fire_request() = runTest(testDispatcher) {
-        val service = RecordingAnalysisService()
+    fun offline_tap_does_not_enqueue_work() = runTest(testDispatcher) {
+        val scheduler = RecordingScheduler()
         val vm = AnalysisViewModel(
             profileRepository = FakeProfileRepository(),
-            logRepository = FakeLogRepository(emptyList()),
-            analysisService = service,
+            resultStore = FakeResultStore(),
+            scheduler = scheduler,
             connectivity = { false },
-            ioDispatcher = testDispatcher,
         )
+        testDispatcher.scheduler.advanceUntilIdle()
 
         vm.triggerAnalysis()
         testDispatcher.scheduler.advanceUntilIdle()
 
-        // Most important: the analysis service was not touched.
-        assertEquals(0, service.callCount)
+        // Most important: WorkManager was never touched.
+        assertEquals(0, scheduler.enqueueCount)
         assertEquals(AnalysisPhase.Idle, vm.state.value.phase)
         assertEquals("No internet — connect and try again.", vm.state.value.transientError)
     }
 
     @Test
-    fun online_tap_goes_loading_then_success() = runTest(testDispatcher) {
-        val service = RecordingAnalysisService(
-            result = AnalysisResult.Success("You look stressed."),
-            delayMs = 50,
-        )
+    fun online_tap_enqueues_and_flips_to_loading() = runTest(testDispatcher) {
+        val scheduler = RecordingScheduler()
         val vm = AnalysisViewModel(
             profileRepository = FakeProfileRepository(),
-            logRepository = FakeLogRepository(emptyList()),
-            analysisService = service,
+            resultStore = FakeResultStore(),
+            scheduler = scheduler,
             connectivity = { true },
-            ioDispatcher = testDispatcher,
         )
+        testDispatcher.scheduler.advanceUntilIdle()
 
+        vm.onUserContextChange("felt off today")
         vm.triggerAnalysis()
-        // Before scheduler advances, we should already be in Loading — the
-        // state flip is synchronous on the caller dispatcher.
         testDispatcher.scheduler.runCurrent()
+
+        assertEquals(1, scheduler.enqueueCount)
+        assertEquals("felt off today", scheduler.lastUserContext)
         assertTrue(
-            "expected Loading immediately after tap, saw ${vm.state.value.phase}",
+            "expected Loading after tap, saw ${vm.state.value.phase}",
             vm.state.value.phase is AnalysisPhase.Loading,
         )
-
-        testDispatcher.scheduler.advanceUntilIdle()
-        val phase = vm.state.value.phase
-        assertTrue("expected Success, got $phase", phase is AnalysisPhase.Success)
-        assertEquals("You look stressed.", (phase as AnalysisPhase.Success).summaryText)
-        assertEquals(1, service.callCount)
     }
 
     @Test
-    fun api_error_surfaces_as_transient_error_not_crash() = runTest(testDispatcher) {
-        val service = RecordingAnalysisService(result = AnalysisResult.ApiError("boom"))
+    fun stored_result_is_reflected_as_success_phase() = runTest(testDispatcher) {
+        val store = FakeResultStore()
         val vm = AnalysisViewModel(
             profileRepository = FakeProfileRepository(),
-            logRepository = FakeLogRepository(emptyList()),
-            analysisService = service,
+            resultStore = store,
+            scheduler = RecordingScheduler(),
             connectivity = { true },
-            ioDispatcher = testDispatcher,
         )
+        testDispatcher.scheduler.advanceUntilIdle()
+
+        store.emit(
+            StoredAnalysis(
+                summaryText = "GUIDANCE: clear\n## Patterns\n- ok",
+                guidance = AnalysisGuidance.Clear,
+                completedAtEpochMillis = 1_000L,
+            ),
+        )
+        testDispatcher.scheduler.advanceUntilIdle()
+
+        val phase = vm.state.value.phase
+        assertTrue("expected Success, got $phase", phase is AnalysisPhase.Success)
+        val success = phase as AnalysisPhase.Success
+        assertEquals(AnalysisGuidance.Clear, success.guidance)
+        assertTrue(success.summaryText.contains("Patterns"))
+    }
+
+    @Test
+    fun failed_work_surfaces_transient_error() = runTest(testDispatcher) {
+        val scheduler = RecordingScheduler()
+        val vm = AnalysisViewModel(
+            profileRepository = FakeProfileRepository(),
+            resultStore = FakeResultStore(),
+            scheduler = scheduler,
+            connectivity = { true },
+        )
+        testDispatcher.scheduler.advanceUntilIdle()
 
         vm.triggerAnalysis()
+        testDispatcher.scheduler.runCurrent()
+        assertTrue(vm.state.value.phase is AnalysisPhase.Loading)
+
+        scheduler.emit(
+            fakeWorkInfo(
+                state = WorkInfo.State.FAILED,
+                outputData = Data.Builder()
+                    .putString(AnalysisWorker.KEY_FAILURE_KIND, AnalysisWorker.FAILURE_TIMEOUT)
+                    .build(),
+            ),
+        )
         testDispatcher.scheduler.advanceUntilIdle()
 
         assertEquals(AnalysisPhase.Idle, vm.state.value.phase)
-        assertEquals("boom", vm.state.value.transientError)
+        assertEquals("AI took too long to respond — try again.", vm.state.value.transientError)
     }
 
     @Test
-    fun no_network_result_from_client_is_mapped_to_friendly_error() = runTest(testDispatcher) {
-        val service = RecordingAnalysisService(result = AnalysisResult.NoNetwork)
+    fun api_error_failure_includes_server_message() = runTest(testDispatcher) {
+        val scheduler = RecordingScheduler()
         val vm = AnalysisViewModel(
             profileRepository = FakeProfileRepository(),
-            logRepository = FakeLogRepository(emptyList()),
-            analysisService = service,
-            connectivity = { true }, // guard passed, but mid-request we dropped
-            ioDispatcher = testDispatcher,
+            resultStore = FakeResultStore(),
+            scheduler = scheduler,
+            connectivity = { true },
         )
-
-        vm.triggerAnalysis()
         testDispatcher.scheduler.advanceUntilIdle()
 
-        val err = vm.state.value.transientError
-        assertNotNull(err)
-        // Distinct from the "offline before tap" copy — helps QA tell them apart.
-        assertFalse(err!!.startsWith("No internet —"))
+        vm.triggerAnalysis()
+        testDispatcher.scheduler.runCurrent()
+
+        scheduler.emit(
+            fakeWorkInfo(
+                state = WorkInfo.State.FAILED,
+                outputData = Data.Builder()
+                    .putString(AnalysisWorker.KEY_FAILURE_KIND, AnalysisWorker.FAILURE_API_ERROR)
+                    .putString(AnalysisWorker.KEY_FAILURE_MESSAGE, "quota exceeded")
+                    .build(),
+            ),
+        )
+        testDispatcher.scheduler.advanceUntilIdle()
+
+        assertEquals("quota exceeded", vm.state.value.transientError)
     }
 
     @Test
     fun double_tap_while_loading_does_not_fire_twice() = runTest(testDispatcher) {
-        val service = RecordingAnalysisService(
-            result = AnalysisResult.Success("done"),
-            delayMs = 200,
-        )
+        val scheduler = RecordingScheduler()
         val vm = AnalysisViewModel(
             profileRepository = FakeProfileRepository(),
-            logRepository = FakeLogRepository(emptyList()),
-            analysisService = service,
+            resultStore = FakeResultStore(),
+            scheduler = scheduler,
             connectivity = { true },
-            ioDispatcher = testDispatcher,
         )
+        testDispatcher.scheduler.advanceUntilIdle()
 
         vm.triggerAnalysis()
         testDispatcher.scheduler.runCurrent()
@@ -169,49 +210,18 @@ class AnalysisViewModelTest {
         vm.triggerAnalysis() // second tap while still loading
         testDispatcher.scheduler.advanceUntilIdle()
 
-        assertEquals(1, service.callCount)
-    }
-
-    @Test
-    fun logs_are_loaded_from_repository_before_analysis() = runTest(testDispatcher) {
-        val service = RecordingAnalysisService(result = AnalysisResult.Success("ok"))
-        val stored = listOf(
-            SymptomLog(
-                id = 1L,
-                symptomName = "Migraine",
-                description = "",
-                startEpochMillis = 0L,
-                endEpochMillis = null,
-                severity = 5,
-                medication = "",
-                contextTags = emptyList(),
-                notes = "",
-            ),
-        )
-        val vm = AnalysisViewModel(
-            profileRepository = FakeProfileRepository(),
-            logRepository = FakeLogRepository(stored),
-            analysisService = service,
-            connectivity = { true },
-            ioDispatcher = testDispatcher,
-        )
-
-        vm.triggerAnalysis()
-        testDispatcher.scheduler.advanceUntilIdle()
-
-        assertEquals(1, service.lastLogs.size)
-        assertEquals("Migraine", service.lastLogs.first().symptomName)
+        assertEquals(1, scheduler.enqueueCount)
     }
 
     @Test
     fun transient_error_shown_callback_clears_state() = runTest(testDispatcher) {
         val vm = AnalysisViewModel(
             profileRepository = FakeProfileRepository(),
-            logRepository = FakeLogRepository(emptyList()),
-            analysisService = RecordingAnalysisService(),
+            resultStore = FakeResultStore(),
+            scheduler = RecordingScheduler(),
             connectivity = { false },
-            ioDispatcher = testDispatcher,
         )
+        testDispatcher.scheduler.advanceUntilIdle()
 
         vm.triggerAnalysis()
         testDispatcher.scheduler.advanceUntilIdle()
@@ -221,7 +231,36 @@ class AnalysisViewModelTest {
         assertNull(vm.state.value.transientError)
     }
 
-    // --- test doubles --------------------------------------------------
+    @Test
+    fun no_network_failure_from_worker_is_mapped_to_friendly_copy() = runTest(testDispatcher) {
+        val scheduler = RecordingScheduler()
+        val vm = AnalysisViewModel(
+            profileRepository = FakeProfileRepository(),
+            resultStore = FakeResultStore(),
+            scheduler = scheduler,
+            connectivity = { true },
+        )
+        testDispatcher.scheduler.advanceUntilIdle()
+
+        vm.triggerAnalysis()
+        testDispatcher.scheduler.runCurrent()
+        scheduler.emit(
+            fakeWorkInfo(
+                state = WorkInfo.State.FAILED,
+                outputData = Data.Builder()
+                    .putString(AnalysisWorker.KEY_FAILURE_KIND, AnalysisWorker.FAILURE_NO_NETWORK)
+                    .build(),
+            ),
+        )
+        testDispatcher.scheduler.advanceUntilIdle()
+
+        val err = vm.state.value.transientError
+        assertNotNull(err)
+        // Distinct from the pre-tap offline copy — lets QA tell the two apart.
+        assertFalse(err!!.startsWith("No internet —"))
+    }
+
+    // --- test doubles ---------------------------------------------------
 
     private class FakeProfileRepository(
         initial: UserProfile = UserProfile(),
@@ -236,71 +275,82 @@ class AnalysisViewModelTest {
         }
     }
 
-    private class FakeLogRepository(
-        private val stored: List<SymptomLog>,
-    ) : SymptomLogRepository(dao = UnusedDao) {
-        override fun observeAll(): Flow<List<SymptomLog>> = flowOf(stored)
+    /**
+     * The real [AnalysisResultStore] requires a DataStore backing; we
+     * override the observable `latest` so the ViewModel watches our
+     * MutableStateFlow instead. save()/clear() are no-ops here — we test
+     * them separately against a real store.
+     */
+    private class FakeResultStore : AnalysisResultStore(dataStore = UnusedDataStore) {
+        private val flow = MutableStateFlow<StoredAnalysis?>(null)
+        override val latest: Flow<StoredAnalysis?> = flow.asStateFlow()
+
+        fun emit(value: StoredAnalysis?) {
+            flow.value = value
+        }
+
+        override suspend fun save(
+            summaryText: String,
+            guidance: AnalysisGuidance,
+            completedAtEpochMillis: Long,
+        ) {
+            flow.value = StoredAnalysis(summaryText, guidance, completedAtEpochMillis)
+        }
+
+        override suspend fun clear() {
+            flow.value = null
+        }
     }
 
-    /**
-     * The constructor requires a DataStore even though every real call goes
-     * through the overridden [UserProfileRepository.profile] flow above.
-     * This stand-in never has its data accessed; it exists only to satisfy
-     * the type system.
-     */
+    private class RecordingScheduler : AnalysisScheduler {
+        var enqueueCount: Int = 0
+            private set
+        var lastUserContext: String? = null
+            private set
+        private val flow = MutableStateFlow<List<WorkInfo>>(emptyList())
+
+        override fun enqueue(userContext: String) {
+            enqueueCount += 1
+            lastUserContext = userContext
+            emit(
+                fakeWorkInfo(
+                    state = WorkInfo.State.RUNNING,
+                    outputData = Data.EMPTY,
+                ),
+            )
+        }
+
+        override fun currentWorkInfos(): Flow<List<WorkInfo>> = flow.asStateFlow()
+        override fun cancel() = Unit
+
+        fun emit(info: WorkInfo) {
+            flow.value = listOf(info)
+        }
+    }
+
     private object UnusedDataStore : DataStore<Preferences> {
         override val data: Flow<Preferences> = MutableStateFlow(mutablePreferencesOf())
         override suspend fun updateData(
             transform: suspend (t: Preferences) -> Preferences,
         ): Preferences = error("UnusedDataStore.updateData should not be called")
     }
-
-    /** Same rationale as [UnusedDataStore] — satisfies the repository ctor. */
-    private object UnusedDao : SymptomLogDao {
-        override suspend fun insert(entity: SymptomLogEntity): Long = 0L
-        override suspend fun update(entity: SymptomLogEntity): Int = 0
-        override fun observeAll() = MutableStateFlow<List<SymptomLogEntity>>(emptyList())
-        override fun observeFiltered(
-            query: String?,
-            minSeverity: Int,
-            maxSeverity: Int,
-            startAfter: Long?,
-            startBefore: Long?,
-            sortKey: String,
-        ) = MutableStateFlow<List<SymptomLogEntity>>(emptyList())
-        override fun observeById(id: Long) = MutableStateFlow<SymptomLogEntity?>(null)
-        override fun observeCount() = MutableStateFlow(0)
-        override suspend fun delete(id: Long) = Unit
-    }
-
-    private class RecordingAnalysisService(
-        private val result: AnalysisResult = AnalysisResult.Success("ok"),
-        private val delayMs: Long = 0,
-    ) : AnalysisService(client = UnreachableClient) {
-        var callCount: Int = 0
-            private set
-        var lastLogs: List<SymptomLog> = emptyList()
-            private set
-
-        override suspend fun analyze(
-            profile: UserProfile,
-            userContext: String,
-            logs: List<SymptomLog>,
-        ): AnalysisResult {
-            callCount += 1
-            lastLogs = logs
-            if (delayMs > 0) delay(delayMs)
-            return result
-        }
-    }
-
-    /**
-     * The client never runs in ViewModel tests because RecordingAnalysisService
-     * overrides [AnalysisService.analyze] in full. This stub exists solely to
-     * satisfy the constructor without pulling in MockWebServer.
-     */
-    private object UnreachableClient : GeminiClient {
-        override suspend fun analyze(request: AnalysisRequest): AnalysisResult =
-            error("client should not be reached in ViewModel tests")
-    }
 }
+
+/**
+ * work-runtime 2.9 exposes a 7-arg constructor for [WorkInfo]; we use it
+ * to build fakes without pulling in TestListenableWorkerBuilder (which
+ * would expect a real Worker class). Kept file-private so the inner test
+ * classes can reach it.
+ */
+private fun fakeWorkInfo(
+    state: WorkInfo.State,
+    outputData: Data = Data.EMPTY,
+): WorkInfo = WorkInfo(
+    /* id = */ UUID.randomUUID(),
+    /* state = */ state,
+    /* tags = */ emptySet(),
+    /* outputData = */ outputData,
+    /* progress = */ Data.EMPTY,
+    /* runAttemptCount = */ 0,
+    /* generation = */ 0,
+)

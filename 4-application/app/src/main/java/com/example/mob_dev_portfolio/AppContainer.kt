@@ -8,11 +8,17 @@ import androidx.datastore.preferences.preferencesDataStore
 import com.example.mob_dev_portfolio.data.AuraDatabase
 import com.example.mob_dev_portfolio.data.SymptomLogEntity
 import com.example.mob_dev_portfolio.data.SymptomLogRepository
+import androidx.work.WorkManager
+import com.example.mob_dev_portfolio.data.ai.AnalysisResultStore
 import com.example.mob_dev_portfolio.data.ai.AnalysisService
 import com.example.mob_dev_portfolio.data.ai.AndroidNetworkConnectivity
 import com.example.mob_dev_portfolio.data.ai.GeminiClient
 import com.example.mob_dev_portfolio.data.ai.HttpGeminiClient
 import com.example.mob_dev_portfolio.data.ai.NetworkConnectivity
+import com.example.mob_dev_portfolio.notifications.AnalysisNotifier
+import com.example.mob_dev_portfolio.ui.DeepLinkEvents
+import com.example.mob_dev_portfolio.work.AnalysisScheduler
+import com.example.mob_dev_portfolio.work.WorkManagerAnalysisScheduler
 import com.example.mob_dev_portfolio.data.environment.EnvironmentalService
 import com.example.mob_dev_portfolio.data.environment.OpenMeteoEnvironmentalService
 import com.example.mob_dev_portfolio.data.location.AndroidGeocoder
@@ -30,6 +36,7 @@ import java.io.IOException
 
 private val Context.uiPreferencesStore: DataStore<Preferences> by preferencesDataStore(name = "aura_ui_prefs")
 private val Context.userProfileStore: DataStore<Preferences> by preferencesDataStore(name = "aura_user_profile")
+private val Context.analysisResultStoreDs: DataStore<Preferences> by preferencesDataStore(name = "aura_analysis_result")
 
 interface AppContainer {
     val symptomLogRepository: SymptomLogRepository
@@ -41,6 +48,27 @@ interface AppContainer {
     val geminiClient: GeminiClient
     val analysisService: AnalysisService
     val networkConnectivity: NetworkConnectivity
+
+    /**
+     * Surfaces results from the background [com.example.mob_dev_portfolio.work.AnalysisWorker]
+     * to the UI: the worker writes here on success; the Analysis screen
+     * observes it. Also survives process death, so a notification tap that
+     * cold-starts the app still finds the summary waiting.
+     */
+    val analysisResultStore: AnalysisResultStore
+
+    /** Channel + notification builder shared by the worker. */
+    val analysisNotifier: AnalysisNotifier
+
+    /** Thin façade over WorkManager for the Analysis feature. */
+    val analysisScheduler: AnalysisScheduler
+
+    /**
+     * App-wide event bus for notification-tap deep links. [MainActivity]
+     * emits when it detects the notification extra; the Compose nav layer
+     * subscribes and routes to the Analysis destination.
+     */
+    val deepLinkEvents: DeepLinkEvents
 }
 
 class DefaultAppContainer(
@@ -131,6 +159,24 @@ class DefaultAppContainer(
     override val networkConnectivity: NetworkConnectivity by lazy {
         AndroidNetworkConnectivity(appContext)
     }
+
+    override val analysisResultStore: AnalysisResultStore by lazy {
+        AnalysisResultStore(appContext.analysisResultStoreDs)
+    }
+
+    override val analysisNotifier: AnalysisNotifier by lazy {
+        AnalysisNotifier(appContext)
+    }
+
+    override val analysisScheduler: AnalysisScheduler by lazy {
+        // WorkManager.getInstance initialises via the default
+        // WorkManagerInitializer content provider, which is already on the
+        // classpath via the work-runtime-ktx dependency — no manual
+        // bootstrap required in Application.onCreate.
+        WorkManagerAnalysisScheduler(WorkManager.getInstance(appContext))
+    }
+
+    override val deepLinkEvents: DeepLinkEvents by lazy { DeepLinkEvents() }
 
     companion object {
         private const val TAG = "AppContainer"

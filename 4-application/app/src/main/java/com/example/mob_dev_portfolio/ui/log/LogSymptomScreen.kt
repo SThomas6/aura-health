@@ -49,7 +49,6 @@ import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Scaffold
-import androidx.compose.material3.Slider
 import androidx.compose.material3.SnackbarHost
 import androidx.compose.material3.SnackbarHostState
 import androidx.compose.material3.Surface
@@ -722,35 +721,73 @@ private fun LocationOptIn(
     }
 }
 
+/**
+ * Severity picker redesigned for the mint-clinical expressive theme.
+ *
+ * The large numeric readout is coloured by the severity scale (mint at
+ * the low end, coral at the high end) so the value reinforces the
+ * semantics even before the user reads the accompanying band label.
+ * The Slider underneath carries the gradient track + coloured thumb; a
+ * segmented row gives snap-targets for users who'd rather tap than drag.
+ *
+ * `testTag("severity_value")` and `testTag("severity_slider")` are kept
+ * exactly where the legacy picker placed them so the UI tests that
+ * drive them don't need to change.
+ */
 @Composable
 private fun SeveritySlider(
     value: Int,
     onValueChange: (Int) -> Unit,
 ) {
-    Column {
-        Box(modifier = Modifier.fillMaxWidth()) {
+    Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+        Row(
+            verticalAlignment = Alignment.Bottom,
+            horizontalArrangement = Arrangement.spacedBy(12.dp),
+        ) {
             Text(
                 text = value.toString(),
-                style = MaterialTheme.typography.displayLarge,
-                color = MaterialTheme.colorScheme.primary,
-                modifier = Modifier
-                    .align(Alignment.Center)
-                    .testTag("severity_value"),
+                fontFamily = com.example.mob_dev_portfolio.ui.theme.AuraMonoFamily,
+                fontWeight = FontWeight.Bold,
+                color = com.example.mob_dev_portfolio.ui.theme.severityColor(value),
+                style = MaterialTheme.typography.displayLarge.copy(fontSize = androidx.compose.ui.unit.TextUnit(72f, androidx.compose.ui.unit.TextUnitType.Sp)),
+                modifier = Modifier.testTag("severity_value"),
             )
+            Column(modifier = Modifier.padding(bottom = 14.dp)) {
+                Text(
+                    "SEVERITY",
+                    style = MaterialTheme.typography.labelMedium,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+                Text(
+                    text = when {
+                        value <= 3 -> "Mild"
+                        value <= 7 -> "Moderate"
+                        else -> "Severe"
+                    },
+                    style = MaterialTheme.typography.titleMedium,
+                )
+            }
         }
-        Slider(
-            value = value.toFloat(),
-            onValueChange = { onValueChange(kotlin.math.round(it).toInt()) },
-            valueRange = LogValidator.MIN_SEVERITY.toFloat()..LogValidator.MAX_SEVERITY.toFloat(),
-            steps = LogValidator.MAX_SEVERITY - LogValidator.MIN_SEVERITY - 1,
+        com.example.mob_dev_portfolio.ui.components.SeveritySlider(
+            value = value,
+            onValueChange = onValueChange,
+            min = LogValidator.MIN_SEVERITY,
+            max = LogValidator.MAX_SEVERITY,
             modifier = Modifier
                 .fillMaxWidth()
                 .heightIn(min = 48.dp)
                 .testTag("severity_slider"),
         )
+        com.example.mob_dev_portfolio.ui.components.SeveritySegmentedRow(
+            value = value,
+            onValueChange = onValueChange,
+            min = LogValidator.MIN_SEVERITY,
+            max = LogValidator.MAX_SEVERITY,
+        )
         Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
-            Text("Mild", style = MaterialTheme.typography.labelLarge, color = MaterialTheme.colorScheme.onSurfaceVariant)
-            Text("Severe", style = MaterialTheme.typography.labelLarge, color = MaterialTheme.colorScheme.onSurfaceVariant)
+            Text("Mild", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+            Text("Moderate", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+            Text("Severe", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
         }
     }
 }

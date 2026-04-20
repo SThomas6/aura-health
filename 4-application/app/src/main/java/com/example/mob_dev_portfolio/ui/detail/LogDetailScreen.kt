@@ -1,5 +1,6 @@
 package com.example.mob_dev_portfolio.ui.detail
 
+import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -17,6 +18,9 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.Brush
+import androidx.compose.ui.graphics.Color
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.Delete
@@ -54,6 +58,10 @@ import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewmodel.compose.viewModel
 import com.example.mob_dev_portfolio.data.SymptomLog
+import com.example.mob_dev_portfolio.ui.theme.AuraInk
+import com.example.mob_dev_portfolio.ui.theme.AuraMonoFamily
+import com.example.mob_dev_portfolio.ui.theme.severityColor
+import java.time.Duration
 import java.time.Instant
 import java.time.ZoneId
 import java.time.format.DateTimeFormatter
@@ -212,29 +220,12 @@ private fun DetailContent(
             .testTag("detail_content"),
         verticalArrangement = Arrangement.spacedBy(16.dp),
     ) {
-        Card(
-            colors = CardDefaults.cardColors(
-                containerColor = MaterialTheme.colorScheme.primaryContainer,
-                contentColor = MaterialTheme.colorScheme.onPrimaryContainer,
-            ),
-            shape = RoundedCornerShape(24.dp),
-        ) {
-            Column(
-                modifier = Modifier.padding(20.dp),
-                verticalArrangement = Arrangement.spacedBy(4.dp),
-            ) {
-                Text(
-                    log.symptomName,
-                    style = MaterialTheme.typography.headlineSmall,
-                    fontWeight = FontWeight.SemiBold,
-                    modifier = Modifier.testTag("detail_symptom"),
-                )
-                Text(
-                    "Severity ${log.severity}/10",
-                    style = MaterialTheme.typography.titleMedium,
-                )
-            }
-        }
+        SeverityHeroCard(
+            symptomName = log.symptomName,
+            severity = log.severity,
+            startLabel = start.format(DateTimeFormat),
+            durationLabel = formatDuration(log.startEpochMillis, log.endEpochMillis),
+        )
 
         DetailRow(label = "Description", value = log.description, testTag = "detail_description")
         DetailRow(label = "Started", value = start.format(DateTimeFormat), testTag = "detail_start")
@@ -253,7 +244,18 @@ private fun DetailContent(
                 )
                 FlowRow(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
                     log.contextTags.forEach { tag ->
-                        AssistChip(onClick = {}, label = { Text(tag) }, enabled = false)
+                        Surface(
+                            color = MaterialTheme.colorScheme.surfaceContainerHigh,
+                            contentColor = MaterialTheme.colorScheme.onSurface,
+                            shape = RoundedCornerShape(999.dp),
+                        ) {
+                            Text(
+                                text = tag,
+                                modifier = Modifier.padding(horizontal = 10.dp, vertical = 4.dp),
+                                style = MaterialTheme.typography.labelMedium,
+                                fontWeight = FontWeight.Medium,
+                            )
+                        }
                     }
                 }
             }
@@ -357,6 +359,109 @@ private fun buildEnvironmentalLines(log: SymptomLog): List<Pair<String, String>>
         lines += "Air quality (EAQI)" to it.toString()
     }
     return lines
+}
+
+/**
+ * Hero card for the detail screen. Sits at the top of the scroll and is
+ * the "this is how bad it was" readout — gradient paints from Aura ink
+ * (deep mint) through primary into the severity colour so the hue
+ * telegraphs the severity before the numbers register. The severity
+ * number is rendered in the mono family to match the rest of the app's
+ * quantitative readouts.
+ */
+@Composable
+private fun SeverityHeroCard(
+    symptomName: String,
+    severity: Int,
+    startLabel: String,
+    durationLabel: String?,
+) {
+    val sev = severityColor(severity.coerceIn(1, 10))
+    val gradient = Brush.linearGradient(
+        colors = listOf(AuraInk, MaterialTheme.colorScheme.primary, sev),
+    )
+    Box(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clip(RoundedCornerShape(28.dp))
+            .background(gradient)
+            .padding(20.dp)
+            .testTag("detail_hero"),
+    ) {
+        Row(verticalAlignment = Alignment.Top) {
+            Column(modifier = Modifier.weight(1f)) {
+                Text(
+                    "SYMPTOM",
+                    color = Color.White.copy(alpha = 0.75f),
+                    style = MaterialTheme.typography.labelMedium,
+                    fontWeight = FontWeight.SemiBold,
+                )
+                Spacer(Modifier.height(2.dp))
+                Text(
+                    symptomName,
+                    color = Color.White,
+                    style = MaterialTheme.typography.headlineSmall,
+                    fontWeight = FontWeight.SemiBold,
+                    modifier = Modifier.testTag("detail_symptom"),
+                )
+                Spacer(Modifier.height(10.dp))
+                Text(
+                    startLabel,
+                    color = Color.White.copy(alpha = 0.85f),
+                    fontFamily = AuraMonoFamily,
+                    style = MaterialTheme.typography.bodyMedium,
+                )
+                if (!durationLabel.isNullOrBlank()) {
+                    Spacer(Modifier.height(4.dp))
+                    Surface(
+                        color = Color.White.copy(alpha = 0.18f),
+                        contentColor = Color.White,
+                        shape = RoundedCornerShape(999.dp),
+                    ) {
+                        Text(
+                            "Lasted $durationLabel",
+                            modifier = Modifier.padding(horizontal = 10.dp, vertical = 4.dp),
+                            fontFamily = AuraMonoFamily,
+                            style = MaterialTheme.typography.labelMedium,
+                            fontWeight = FontWeight.SemiBold,
+                        )
+                    }
+                }
+            }
+            Column(horizontalAlignment = Alignment.End) {
+                Text(
+                    text = severity.toString(),
+                    color = Color.White,
+                    fontFamily = AuraMonoFamily,
+                    style = MaterialTheme.typography.displayLarge,
+                    fontWeight = FontWeight.Bold,
+                )
+                Text(
+                    text = "/ 10",
+                    color = Color.White.copy(alpha = 0.75f),
+                    fontFamily = AuraMonoFamily,
+                    style = MaterialTheme.typography.labelLarge,
+                )
+            }
+        }
+    }
+}
+
+/**
+ * Pretty-prints the elapsed time between `start` and `end`. Returns null
+ * when the log is still ongoing (no end timestamp) so the caller can
+ * skip rendering the "Lasted …" badge altogether.
+ */
+private fun formatDuration(startMillis: Long, endMillis: Long?): String? {
+    if (endMillis == null || endMillis <= startMillis) return null
+    val duration = Duration.ofMillis(endMillis - startMillis)
+    val hours = duration.toHours()
+    val minutes = (duration.toMinutes() % 60).toInt()
+    return when {
+        hours >= 24 -> "${duration.toDays()}d ${hours % 24}h"
+        hours >= 1 -> "${hours}h ${minutes}m"
+        else -> "${minutes}m"
+    }
 }
 
 @Composable

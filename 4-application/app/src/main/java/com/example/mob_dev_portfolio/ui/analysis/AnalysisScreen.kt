@@ -1,6 +1,8 @@
 package com.example.mob_dev_portfolio.ui.analysis
 
+import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
@@ -9,9 +11,12 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.Color
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.AutoAwesome
 import androidx.compose.material3.Button
@@ -45,6 +50,8 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewmodel.compose.viewModel
+import com.example.mob_dev_portfolio.ui.components.auraHeroGradient
+import com.example.mob_dev_portfolio.ui.theme.AuraMonoFamily
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
@@ -103,26 +110,42 @@ fun AnalysisScreen(
 
 @Composable
 private fun IntroCard() {
-    Card(
-        colors = CardDefaults.cardColors(
-            containerColor = MaterialTheme.colorScheme.primaryContainer,
-            contentColor = MaterialTheme.colorScheme.onPrimaryContainer,
-        ),
-        shape = RoundedCornerShape(24.dp),
-        modifier = Modifier.fillMaxWidth(),
+    // Gradient hero modelled after the redesign's Analysis intro. The
+    // "Gemini · Private" eyebrow sets expectations about where the
+    // inference runs before the user even reads the body copy.
+    Box(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clip(RoundedCornerShape(28.dp))
+            .background(auraHeroGradient())
+            .padding(20.dp)
+            .testTag("analysis_intro"),
     ) {
-        Column(modifier = Modifier.padding(20.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+        Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
             Row(verticalAlignment = Alignment.CenterVertically) {
-                Icon(Icons.Filled.AutoAwesome, contentDescription = null)
-                Spacer(Modifier.height(4.dp))
+                Icon(
+                    Icons.Filled.AutoAwesome,
+                    contentDescription = null,
+                    tint = Color.White,
+                )
+                Spacer(Modifier.width(8.dp))
                 Text(
-                    "  AI correlation check",
-                    style = MaterialTheme.typography.titleMedium,
+                    "GEMINI · PRIVATE",
+                    color = Color.White.copy(alpha = 0.85f),
+                    fontFamily = AuraMonoFamily,
+                    style = MaterialTheme.typography.labelMedium,
                     fontWeight = FontWeight.SemiBold,
                 )
             }
             Text(
+                "AI correlation check",
+                color = Color.White,
+                style = MaterialTheme.typography.headlineSmall,
+                fontWeight = FontWeight.SemiBold,
+            )
+            Text(
                 "Your logs and the context you add below are sent to Gemini. Names and exact dates of birth are stripped before the request leaves this device — only an age range is shared.",
+                color = Color.White.copy(alpha = 0.9f),
                 style = MaterialTheme.typography.bodyMedium,
             )
         }
@@ -140,11 +163,29 @@ private fun ProfileCard(
     var showDatePicker by rememberSaveable { mutableStateOf(false) }
     Card(shape = RoundedCornerShape(20.dp), modifier = Modifier.fillMaxWidth()) {
         Column(modifier = Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
-            Text(
-                "Your details (stored on device only)",
-                style = MaterialTheme.typography.titleMedium,
-                fontWeight = FontWeight.Medium,
-            )
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Text(
+                    "Your details",
+                    style = MaterialTheme.typography.titleMedium,
+                    fontWeight = FontWeight.Medium,
+                    modifier = Modifier.weight(1f),
+                )
+                // Mono-tagged pill that restates the privacy posture —
+                // matches the "on device only" badge from the prototype.
+                androidx.compose.material3.Surface(
+                    color = MaterialTheme.colorScheme.primaryContainer,
+                    contentColor = MaterialTheme.colorScheme.onPrimaryContainer,
+                    shape = RoundedCornerShape(999.dp),
+                ) {
+                    Text(
+                        text = "ON DEVICE ONLY",
+                        modifier = Modifier.padding(horizontal = 10.dp, vertical = 4.dp),
+                        fontFamily = AuraMonoFamily,
+                        style = MaterialTheme.typography.labelSmall,
+                        fontWeight = FontWeight.SemiBold,
+                    )
+                }
+            }
             OutlinedTextField(
                 value = fullName,
                 onValueChange = onFullNameChange,
@@ -299,6 +340,22 @@ private fun AnalysisResultArea(phase: AnalysisPhase) {
                         "AI summary",
                         style = MaterialTheme.typography.titleMedium,
                         fontWeight = FontWeight.SemiBold,
+                    )
+                    // The headline reflects the two-bucket clinical guidance
+                    // that also fronts the result notification — we show it
+                    // here so a user opening the app directly (not via the
+                    // notification) gets the same top-line takeaway.
+                    Text(
+                        phase.guidance.headline,
+                        style = MaterialTheme.typography.titleSmall,
+                        fontWeight = FontWeight.SemiBold,
+                        color = when (phase.guidance) {
+                            com.example.mob_dev_portfolio.data.ai.AnalysisGuidance.Clear ->
+                                MaterialTheme.colorScheme.primary
+                            com.example.mob_dev_portfolio.data.ai.AnalysisGuidance.SeekAdvice ->
+                                MaterialTheme.colorScheme.error
+                        },
+                        modifier = Modifier.testTag("analysis_guidance_headline"),
                     )
                     // Route through our mini markdown renderer so headings and
                     // bullets render as formatted blocks instead of surfacing
