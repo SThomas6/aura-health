@@ -8,6 +8,11 @@ import androidx.datastore.preferences.preferencesDataStore
 import com.example.mob_dev_portfolio.data.AuraDatabase
 import com.example.mob_dev_portfolio.data.SymptomLogEntity
 import com.example.mob_dev_portfolio.data.SymptomLogRepository
+import com.example.mob_dev_portfolio.data.ai.AnalysisService
+import com.example.mob_dev_portfolio.data.ai.AndroidNetworkConnectivity
+import com.example.mob_dev_portfolio.data.ai.GeminiClient
+import com.example.mob_dev_portfolio.data.ai.HttpGeminiClient
+import com.example.mob_dev_portfolio.data.ai.NetworkConnectivity
 import com.example.mob_dev_portfolio.data.environment.EnvironmentalService
 import com.example.mob_dev_portfolio.data.environment.OpenMeteoEnvironmentalService
 import com.example.mob_dev_portfolio.data.location.AndroidGeocoder
@@ -15,6 +20,7 @@ import com.example.mob_dev_portfolio.data.location.FusedLocationProvider
 import com.example.mob_dev_portfolio.data.location.LocationProvider
 import com.example.mob_dev_portfolio.data.location.ReverseGeocoder
 import com.example.mob_dev_portfolio.data.preferences.UiPreferencesRepository
+import com.example.mob_dev_portfolio.data.preferences.UserProfileRepository
 import com.example.mob_dev_portfolio.data.security.DatabasePassphraseProvider
 import com.example.mob_dev_portfolio.data.security.PassphraseOutcome
 import com.example.mob_dev_portfolio.data.security.PlaintextDatabaseMigrator
@@ -23,6 +29,7 @@ import java.io.File
 import java.io.IOException
 
 private val Context.uiPreferencesStore: DataStore<Preferences> by preferencesDataStore(name = "aura_ui_prefs")
+private val Context.userProfileStore: DataStore<Preferences> by preferencesDataStore(name = "aura_user_profile")
 
 interface AppContainer {
     val symptomLogRepository: SymptomLogRepository
@@ -30,6 +37,10 @@ interface AppContainer {
     val locationProvider: LocationProvider
     val reverseGeocoder: ReverseGeocoder
     val environmentalService: EnvironmentalService
+    val userProfileRepository: UserProfileRepository
+    val geminiClient: GeminiClient
+    val analysisService: AnalysisService
+    val networkConnectivity: NetworkConnectivity
 }
 
 class DefaultAppContainer(
@@ -95,6 +106,30 @@ class DefaultAppContainer(
 
     override val environmentalService: EnvironmentalService by lazy {
         OpenMeteoEnvironmentalService()
+    }
+
+    override val userProfileRepository: UserProfileRepository by lazy {
+        UserProfileRepository(appContext.userProfileStore)
+    }
+
+    /**
+     * BuildConfig carries the key loaded from local.properties at build time.
+     * If the collaborator hasn't set `GEMINI_API_KEY`, [HttpGeminiClient]
+     * short-circuits to an ApiError at call time — we never crash here.
+     */
+    override val geminiClient: GeminiClient by lazy {
+        HttpGeminiClient(
+            apiKey = BuildConfig.GEMINI_API_KEY,
+            model = BuildConfig.GEMINI_MODEL,
+        )
+    }
+
+    override val analysisService: AnalysisService by lazy {
+        AnalysisService(client = geminiClient)
+    }
+
+    override val networkConnectivity: NetworkConnectivity by lazy {
+        AndroidNetworkConnectivity(appContext)
     }
 
     companion object {

@@ -3,6 +3,7 @@ package com.example.mob_dev_portfolio.ui.navigation
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ListAlt
 import androidx.compose.material.icons.filled.Add
+import androidx.compose.material.icons.filled.AutoAwesome
 import androidx.compose.material.icons.filled.Home
 import androidx.compose.ui.graphics.vector.ImageVector
 import kotlinx.serialization.Serializable
@@ -14,6 +15,8 @@ sealed interface TopLevelRoute {
     data object Log : TopLevelRoute
     @Serializable
     data object History : TopLevelRoute
+    @Serializable
+    data object Analysis : TopLevelRoute
 }
 
 @Serializable
@@ -33,4 +36,5 @@ val TopLevelDestinations: List<TopLevelDestination> = listOf(
     TopLevelDestination(TopLevelRoute.Home, "Home", Icons.Filled.Home, TopLevelRoute.Home::class.qualifiedName.orEmpty()),
     TopLevelDestination(TopLevelRoute.Log, "Log", Icons.Filled.Add, TopLevelRoute.Log::class.qualifiedName.orEmpty()),
     TopLevelDestination(TopLevelRoute.History, "History", Icons.AutoMirrored.Filled.ListAlt, TopLevelRoute.History::class.qualifiedName.orEmpty()),
+    TopLevelDestination(TopLevelRoute.Analysis, "Analyse", Icons.Filled.AutoAwesome, TopLevelRoute.Analysis::class.qualifiedName.orEmpty()),
 )
