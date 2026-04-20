@@ -17,6 +17,7 @@ import androidx.navigation.compose.currentBackStackEntryAsState
 import androidx.navigation.compose.rememberNavController
 import androidx.navigation.toRoute
 import androidx.compose.runtime.getValue
+import com.example.mob_dev_portfolio.ui.analysis.AnalysisScreen
 import com.example.mob_dev_portfolio.ui.detail.LogDetailScreen
 import com.example.mob_dev_portfolio.ui.history.HistoryScreen
 import com.example.mob_dev_portfolio.ui.home.HomeScreen
@@ -44,6 +45,7 @@ fun AuraApp() {
                             it.hasRoute<DetailRoute>() ||
                             it.hasRoute<EditLogRoute>()
                     } == true
+                    TopLevelRoute.Analysis -> hierarchy?.any { it.hasRoute<TopLevelRoute.Analysis>() } == true
                 }
                 item(
                     selected = selected,
@@ -80,6 +82,9 @@ fun AuraApp() {
                 HistoryScreen(
                     onOpenLog = { id -> navController.navigate(DetailRoute(id)) },
                 )
+            }
+            composable<TopLevelRoute.Analysis> {
+                AnalysisScreen()
             }
             composable<DetailRoute> { entry ->
                 val route = entry.toRoute<DetailRoute>()

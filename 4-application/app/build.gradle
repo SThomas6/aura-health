@@ -6,6 +6,18 @@ plugins {
     id 'com.google.devtools.ksp'
 }
 
+// Gemini API key — read from local.properties so the key never hits git.
+// A missing/empty key is tolerated at build time; the AnalysisViewModel
+// surfaces a clear "key not configured" ApiError at runtime instead of
+// crashing or failing the build for a collaborator who hasn't set it yet.
+def loadGeminiApiKey = { ->
+    def propsFile = rootProject.file('local.properties')
+    if (!propsFile.exists()) return ''
+    def props = new Properties()
+    propsFile.withInputStream { props.load(it) }
+    return props.getProperty('GEMINI_API_KEY', '') ?: ''
+}
+
 android {
     compileSdk = 35
     namespace = 'com.example.mob_dev_portfolio'
@@ -20,6 +32,8 @@ android {
         vectorDrawables {
             useSupportLibrary true
         }
+        buildConfigField "String", "GEMINI_API_KEY", "\"${loadGeminiApiKey()}\""
+        buildConfigField "String", "GEMINI_MODEL", "\"gemini-3.1-flash-lite-preview\""
     }
 
     buildTypes {
