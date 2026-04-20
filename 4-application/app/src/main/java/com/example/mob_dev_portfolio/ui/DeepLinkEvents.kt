@@ -46,5 +46,16 @@ class DeepLinkEvents {
  * log") forces the navigation layer to handle it.
  */
 sealed interface DeepLinkTarget {
+    /**
+     * Open the AI analysis history list — used for failure notifications
+     * (no specific run to show) and for the legacy "tap the analysis
+     * notification" case when we don't have a rowId.
+     */
     data object AnalysisResult : DeepLinkTarget
+
+    /**
+     * Open the detail view for a specific persisted analysis run. Carries
+     * the Room rowId assigned when the worker inserted the row.
+     */
+    data class AnalysisRun(val runId: Long) : DeepLinkTarget
 }

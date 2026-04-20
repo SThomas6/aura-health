@@ -58,14 +58,20 @@ open class AnalysisNotifier(
      * The happy path: the worker got a [AnalysisGuidance] back from the
      * model. The headline mirrors the enum copy so QA can diff against the
      * acceptance-criterion wording directly.
+     *
+     * [runId] is the Room rowId of the just-inserted analysis run; the
+     * deep-link carries it so a notification tap lands on the specific
+     * run's detail view rather than the generic history list. Caller may
+     * pass `null` only for legacy callers that haven't wired the repo in
+     * yet — the deep-link falls back to the history screen in that case.
      */
-    open fun notifySuccess(guidance: AnalysisGuidance) {
+    open fun notifySuccess(guidance: AnalysisGuidance, runId: Long? = null) {
         val notification = NotificationCompat.Builder(context, CHANNEL_ID)
             .setSmallIcon(R.mipmap.ic_launcher)
             .setContentTitle(guidance.headline)
             .setContentText("Your AI analysis is ready — tap to view the full result.")
             .setStyle(NotificationCompat.BigTextStyle().bigText(guidance.bodyHint))
-            .setContentIntent(buildDeepLink())
+            .setContentIntent(buildDeepLink(runId))
             .setAutoCancel(true)
             .setPriority(NotificationCompat.PRIORITY_DEFAULT)
             .setCategory(NotificationCompat.CATEGORY_STATUS)
@@ -93,7 +99,10 @@ open class AnalysisNotifier(
             .setContentTitle(title)
             .setContentText(body)
             .setStyle(NotificationCompat.BigTextStyle().bigText(body))
-            .setContentIntent(buildDeepLink())
+            // Failure has no run to open — the deep-link lands on the
+            // history screen, where the user can tap "Run AI analysis"
+            // again.
+            .setContentIntent(buildDeepLink(runId = null))
             .setAutoCancel(true)
             .setPriority(NotificationCompat.PRIORITY_DEFAULT)
             .setCategory(NotificationCompat.CATEGORY_ERROR)
@@ -114,8 +123,8 @@ open class AnalysisNotifier(
      *     ours, so the "tap the latest notification" case always opens the
      *     latest result.
      */
-    fun buildDeepLink(): PendingIntent {
-        val intent = buildDeepLinkIntent(context)
+    fun buildDeepLink(runId: Long? = null): PendingIntent {
+        val intent = buildDeepLinkIntent(context, runId)
         return PendingIntent.getActivity(
             context,
             DEEP_LINK_REQUEST_CODE,
@@ -172,14 +181,25 @@ open class AnalysisNotifier(
             "com.example.mob_dev_portfolio.EXTRA_OPEN_ANALYSIS_RESULT"
 
         /**
+         * Companion extra carrying the Room rowId of the run to open. Zero
+         * or missing means "no specific run, land on the history screen".
+         * Namespaced to avoid colliding with any OS-reserved extra.
+         */
+        const val EXTRA_ANALYSIS_RUN_ID =
+            "com.example.mob_dev_portfolio.EXTRA_ANALYSIS_RUN_ID"
+
+        /**
          * Factory exposed so [AnalysisNotifierTest] can assert the intent
          * shape without a live Context-backed PendingIntent.
          */
-        fun buildDeepLinkIntent(context: Context): Intent =
+        fun buildDeepLinkIntent(context: Context, runId: Long? = null): Intent =
             Intent(context, MainActivity::class.java).apply {
                 action = Intent.ACTION_VIEW
                 flags = Intent.FLAG_ACTIVITY_SINGLE_TOP or Intent.FLAG_ACTIVITY_CLEAR_TOP
                 putExtra(EXTRA_OPEN_ANALYSIS_RESULT, true)
+                if (runId != null && runId > 0L) {
+                    putExtra(EXTRA_ANALYSIS_RUN_ID, runId)
+                }
             }
     }
 }

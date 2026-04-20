@@ -22,12 +22,16 @@ import androidx.navigation.toRoute
 import androidx.compose.runtime.getValue
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.example.mob_dev_portfolio.AuraApplication
+import com.example.mob_dev_portfolio.ui.analysis.AnalysisDetailScreen
+import com.example.mob_dev_portfolio.ui.analysis.AnalysisHistoryScreen
 import com.example.mob_dev_portfolio.ui.analysis.AnalysisScreen
 import com.example.mob_dev_portfolio.ui.detail.LogDetailScreen
 import com.example.mob_dev_portfolio.ui.history.HistoryScreen
 import com.example.mob_dev_portfolio.ui.home.HomeScreen
 import com.example.mob_dev_portfolio.ui.log.LogSymptomScreen
 import com.example.mob_dev_portfolio.ui.log.LogSymptomViewModel
+import com.example.mob_dev_portfolio.ui.navigation.AnalysisDetailRoute
+import com.example.mob_dev_portfolio.ui.navigation.AnalysisRunnerRoute
 import com.example.mob_dev_portfolio.ui.navigation.DetailRoute
 import com.example.mob_dev_portfolio.ui.navigation.EditLogRoute
 import com.example.mob_dev_portfolio.ui.navigation.TopLevelDestinations
@@ -58,6 +62,14 @@ fun AuraApp() {
                 navigateToTopLevel(navController, TopLevelRoute.Analysis)
                 deepLinkEvents.consume(target)
             }
+            is DeepLinkTarget.AnalysisRun -> {
+                // Reset to the Analysis tab root first so "back" from
+                // the detail view lands on the history list (rather
+                // than, say, the Log form the user was previously on).
+                navigateToTopLevel(navController, TopLevelRoute.Analysis)
+                navController.navigate(AnalysisDetailRoute(target.runId))
+                deepLinkEvents.consume(target)
+            }
             null -> Unit
         }
     }
@@ -73,7 +85,11 @@ fun AuraApp() {
                             it.hasRoute<DetailRoute>() ||
                             it.hasRoute<EditLogRoute>()
                     } == true
-                    TopLevelRoute.Analysis -> hierarchy?.any { it.hasRoute<TopLevelRoute.Analysis>() } == true
+                    TopLevelRoute.Analysis -> hierarchy?.any {
+                        it.hasRoute<TopLevelRoute.Analysis>() ||
+                            it.hasRoute<AnalysisRunnerRoute>() ||
+                            it.hasRoute<AnalysisDetailRoute>()
+                    } == true
                 }
                 item(
                     selected = selected,
@@ -112,7 +128,28 @@ fun AuraApp() {
                 )
             }
             composable<TopLevelRoute.Analysis> {
+                AnalysisHistoryScreen(
+                    onOpenRun = { id -> navController.navigate(AnalysisDetailRoute(id)) },
+                    onRunNewAnalysis = { navController.navigate(AnalysisRunnerRoute) },
+                )
+            }
+            composable<AnalysisRunnerRoute> {
+                // The "run a new analysis" form — a one-off destination
+                // reached from the history list's FAB. Popping back
+                // lands on the history list, which will refresh via its
+                // Flow-backed state once the worker persists the run.
                 AnalysisScreen()
+            }
+            composable<AnalysisDetailRoute> { entry ->
+                val route = entry.toRoute<AnalysisDetailRoute>()
+                AnalysisDetailScreen(
+                    runId = route.runId,
+                    onBack = {
+                        if (!navController.popBackStack()) {
+                            navigateToTopLevel(navController, TopLevelRoute.Analysis)
+                        }
+                    },
+                )
             }
             composable<DetailRoute> { entry ->
                 val route = entry.toRoute<DetailRoute>()

@@ -53,12 +53,20 @@ class MainActivity : ComponentActivity() {
             false,
         ) == true
         if (!open) return
-        // Clear the extra so a config change doesn't replay the deep link.
+        // Prefer the run-scoped deep link when the worker attached a rowId.
+        // `getLongExtra` returns the default when the extra is absent, so a
+        // missing id falls through to the history-list target.
+        val runId = intent.getLongExtra(AnalysisNotifier.EXTRA_ANALYSIS_RUN_ID, -1L)
+        // Clear the extras so a config change doesn't replay the deep link.
         // setIntent above keeps a reference to the original, so we mutate
         // the bundle in place.
         intent.removeExtra(AnalysisNotifier.EXTRA_OPEN_ANALYSIS_RESULT)
-        (application as AuraApplication).container.deepLinkEvents.emit(
-            DeepLinkTarget.AnalysisResult,
-        )
+        intent.removeExtra(AnalysisNotifier.EXTRA_ANALYSIS_RUN_ID)
+        val target = if (runId > 0L) {
+            DeepLinkTarget.AnalysisRun(runId)
+        } else {
+            DeepLinkTarget.AnalysisResult
+        }
+        (application as AuraApplication).container.deepLinkEvents.emit(target)
     }
 }

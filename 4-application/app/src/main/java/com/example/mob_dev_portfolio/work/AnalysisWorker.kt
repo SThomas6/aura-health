@@ -108,14 +108,37 @@ class AnalysisWorker(
                 summary = outcome.summaryText,
                 maxSeverityInRecentLogs = logs.maxOfOrNull { it.severity } ?: 0,
             )
+            val completedAt = System.currentTimeMillis()
+
+            // Room — durable, queryable, and the source of truth for the
+            // history list. Inserted FIRST so the notification deep-link
+            // below can carry the real rowId: if the write throws we bail
+            // out before notifying and the user retries rather than being
+            // told a run succeeded that has no row to open.
+            val runId = container.analysisHistoryRepository.recordRun(
+                summaryText = outcome.summaryText,
+                guidance = guidance,
+                completedAtEpochMillis = completedAt,
+                logIds = logs.map { it.id },
+            )
+
+            // DataStore — one-slot cache of the latest successful run, kept
+            // for legacy callers (the existing AnalysisScreen still reads
+            // it) and for the fast path on cold start. A future cleanup
+            // pass can drop this once every reader has moved to the Room
+            // flow, but for now both stores agree on the same summary.
             container.analysisResultStore.save(
                 summaryText = outcome.summaryText,
                 guidance = guidance,
-                completedAtEpochMillis = System.currentTimeMillis(),
+                completedAtEpochMillis = completedAt,
             )
-            notifier.notifySuccess(guidance)
+
+            notifier.notifySuccess(guidance = guidance, runId = runId)
             Result.success(
-                Data.Builder().putString(KEY_GUIDANCE, guidance.name).build(),
+                Data.Builder()
+                    .putString(KEY_GUIDANCE, guidance.name)
+                    .putLong(KEY_RUN_ID, runId)
+                    .build(),
             )
         }
         AnalysisResult.NoNetwork -> {
@@ -147,6 +170,15 @@ class AnalysisWorker(
 
         /** Success output — the guidance enum name. */
         const val KEY_GUIDANCE = "guidance"
+
+        /**
+         * Success output — the Room rowId of the freshly inserted run. The
+         * ViewModel can use this to jump straight to the detail screen; in
+         * practice today we only use it to build the notification
+         * deep-link, but plumbing it through [Result.success] keeps parity
+         * with the failure-kind pattern and costs us nothing.
+         */
+        const val KEY_RUN_ID = "run_id"
 
         /**
          * Failure outputs. The ViewModel reads these to paint a matching

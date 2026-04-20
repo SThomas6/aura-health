@@ -9,6 +9,7 @@ import com.example.mob_dev_portfolio.data.AuraDatabase
 import com.example.mob_dev_portfolio.data.SymptomLogEntity
 import com.example.mob_dev_portfolio.data.SymptomLogRepository
 import androidx.work.WorkManager
+import com.example.mob_dev_portfolio.data.ai.AnalysisHistoryRepository
 import com.example.mob_dev_portfolio.data.ai.AnalysisResultStore
 import com.example.mob_dev_portfolio.data.ai.AnalysisService
 import com.example.mob_dev_portfolio.data.ai.AndroidNetworkConnectivity
@@ -56,6 +57,14 @@ interface AppContainer {
      * cold-starts the app still finds the summary waiting.
      */
     val analysisResultStore: AnalysisResultStore
+
+    /**
+     * Room-backed history of every completed AI analysis run. The worker
+     * writes rows here on success; the history screen observes them via
+     * Flow so new results appear without a manual refresh, and the list
+     * reads from local storage so it works offline.
+     */
+    val analysisHistoryRepository: AnalysisHistoryRepository
 
     /** Channel + notification builder shared by the worker. */
     val analysisNotifier: AnalysisNotifier
@@ -162,6 +171,10 @@ class DefaultAppContainer(
 
     override val analysisResultStore: AnalysisResultStore by lazy {
         AnalysisResultStore(appContext.analysisResultStoreDs)
+    }
+
+    override val analysisHistoryRepository: AnalysisHistoryRepository by lazy {
+        AnalysisHistoryRepository(database.analysisRunDao())
     }
 
     override val analysisNotifier: AnalysisNotifier by lazy {
