@@ -6,16 +6,25 @@ import androidx.room.Room
 import androidx.room.RoomDatabase
 import androidx.room.migration.Migration
 import androidx.sqlite.db.SupportSQLiteDatabase
+import com.example.mob_dev_portfolio.data.ai.AnalysisRunDao
+import com.example.mob_dev_portfolio.data.ai.AnalysisRunEntity
+import com.example.mob_dev_portfolio.data.ai.AnalysisRunLogCrossRef
 import net.zetetic.database.sqlcipher.SupportOpenHelperFactory
 
 @Database(
-    entities = [SymptomLogEntity::class],
-    version = 4,
+    entities = [
+        SymptomLogEntity::class,
+        AnalysisRunEntity::class,
+        AnalysisRunLogCrossRef::class,
+    ],
+    version = 5,
     exportSchema = false,
 )
 abstract class AuraDatabase : RoomDatabase() {
 
     abstract fun symptomLogDao(): SymptomLogDao
+
+    abstract fun analysisRunDao(): AnalysisRunDao
 
     companion object {
         @Volatile
@@ -61,6 +70,43 @@ abstract class AuraDatabase : RoomDatabase() {
             }
         }
 
+        /**
+         * Adds the `analysis_runs` table and its `analysis_run_logs` join
+         * table for the AI Analysis History & Detail story. All columns are
+         * non-nullable except where the app treats "unknown" as a real state
+         * — the worker only ever inserts a complete row, so fields like
+         * `summaryText` and `guidance` are always populated. Existing users
+         * see an empty history list until their next analysis completes.
+         */
+        val MIGRATION_4_5: Migration = object : Migration(4, 5) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                db.execSQL(
+                    """
+                    CREATE TABLE IF NOT EXISTS analysis_runs (
+                        id INTEGER PRIMARY KEY AUTOINCREMENT NOT NULL,
+                        completedAtEpochMillis INTEGER NOT NULL,
+                        guidance TEXT NOT NULL,
+                        headline TEXT NOT NULL,
+                        summaryText TEXT NOT NULL
+                    )
+                    """.trimIndent(),
+                )
+                db.execSQL(
+                    """
+                    CREATE TABLE IF NOT EXISTS analysis_run_logs (
+                        runId INTEGER NOT NULL,
+                        logId INTEGER NOT NULL,
+                        PRIMARY KEY(runId, logId),
+                        FOREIGN KEY(runId) REFERENCES analysis_runs(id) ON UPDATE NO ACTION ON DELETE CASCADE
+                    )
+                    """.trimIndent(),
+                )
+                db.execSQL(
+                    "CREATE INDEX IF NOT EXISTS index_analysis_run_logs_logId ON analysis_run_logs(logId)",
+                )
+            }
+        }
+
         fun get(context: Context, passphrase: ByteArray): AuraDatabase =
             instance ?: synchronized(this) {
                 instance ?: Room.databaseBuilder(
@@ -69,7 +115,7 @@ abstract class AuraDatabase : RoomDatabase() {
                     "aura.db",
                 )
                     .openHelperFactory(SupportOpenHelperFactory(passphrase.copyOf()))
-                    .addMigrations(MIGRATION_1_2, MIGRATION_2_3, MIGRATION_3_4)
+                    .addMigrations(MIGRATION_1_2, MIGRATION_2_3, MIGRATION_3_4, MIGRATION_4_5)
                     .build()
                     .also { instance = it }
             }
