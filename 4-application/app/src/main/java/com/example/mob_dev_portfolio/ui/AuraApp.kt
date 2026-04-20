@@ -34,8 +34,10 @@ import com.example.mob_dev_portfolio.ui.navigation.AnalysisDetailRoute
 import com.example.mob_dev_portfolio.ui.navigation.AnalysisRunnerRoute
 import com.example.mob_dev_portfolio.ui.navigation.DetailRoute
 import com.example.mob_dev_portfolio.ui.navigation.EditLogRoute
+import com.example.mob_dev_portfolio.ui.navigation.HealthReportRoute
 import com.example.mob_dev_portfolio.ui.navigation.TopLevelDestinations
 import com.example.mob_dev_portfolio.ui.navigation.TopLevelRoute
+import com.example.mob_dev_portfolio.ui.report.HealthReportScreen
 
 @Composable
 fun AuraApp() {
@@ -110,6 +112,16 @@ fun AuraApp() {
                     onLogSymptomClick = { navigateToTopLevel(navController, TopLevelRoute.Log) },
                     onViewHistoryClick = { navigateToTopLevel(navController, TopLevelRoute.History) },
                     onOpenLog = { id -> navController.navigate(DetailRoute(id)) },
+                    onGenerateReport = { navController.navigate(HealthReportRoute) },
+                )
+            }
+            composable<HealthReportRoute> {
+                HealthReportScreen(
+                    onBack = {
+                        if (!navController.popBackStack()) {
+                            navigateToTopLevel(navController, TopLevelRoute.Home)
+                        }
+                    },
                 )
             }
             composable<TopLevelRoute.Log> {
@@ -149,6 +161,7 @@ fun AuraApp() {
                             navigateToTopLevel(navController, TopLevelRoute.Analysis)
                         }
                     },
+                    onGenerateReport = { navController.navigate(HealthReportRoute) },
                 )
             }
             composable<DetailRoute> { entry ->

@@ -97,6 +97,7 @@ fun HomeScreen(
     onLogSymptomClick: () -> Unit,
     onViewHistoryClick: () -> Unit,
     onOpenLog: (Long) -> Unit,
+    onGenerateReport: () -> Unit,
     viewModel: HomeViewModel = viewModel(factory = HomeViewModel.Factory),
     themeViewModel: ThemePrefsViewModel = viewModel(factory = ThemePrefsViewModel.Factory),
 ) {
@@ -140,6 +141,15 @@ fun HomeScreen(
                 title = "View history",
                 subtitle = "Review and search your past logs",
                 onClick = onViewHistoryClick,
+            )
+            // PDF report generation — entirely offline. The card lives
+            // on Home rather than as a top-level tab so we don't grow
+            // the nav rail past its four-item ergonomic sweet spot.
+            QuickActionCard(
+                title = "Generate health report",
+                subtitle = "Export a PDF summary for your doctor. Works offline.",
+                onClick = onGenerateReport,
+                testTag = "home_generate_report",
             )
             ThemePickerCard(current = themeMode, onSelect = themeViewModel::setThemeMode)
             if (logs.isNotEmpty()) {
@@ -246,14 +256,20 @@ private fun HeroCard(logCount: Int, onLogSymptomClick: () -> Unit) {
 }
 
 @Composable
-private fun QuickActionCard(title: String, subtitle: String, onClick: () -> Unit) {
+private fun QuickActionCard(
+    title: String,
+    subtitle: String,
+    onClick: () -> Unit,
+    testTag: String? = null,
+) {
     Card(
         onClick = onClick,
         shape = MaterialTheme.shapes.large,
         colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
         modifier = Modifier
             .fillMaxWidth()
-            .heightIn(min = 72.dp),
+            .heightIn(min = 72.dp)
+            .then(if (testTag != null) Modifier.testTag(testTag) else Modifier),
     ) {
         Row(
             modifier = Modifier.padding(16.dp),

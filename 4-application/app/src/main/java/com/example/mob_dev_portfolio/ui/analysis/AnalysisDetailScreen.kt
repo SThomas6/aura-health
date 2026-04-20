@@ -18,7 +18,10 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.AutoAwesome
 import androidx.compose.material.icons.filled.DeleteOutline
+import androidx.compose.material.icons.filled.Description
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.material3.AlertDialog
+import androidx.compose.material3.Button
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.CircularProgressIndicator
@@ -69,6 +72,7 @@ private val DetailDateFormat: DateTimeFormatter =
 fun AnalysisDetailScreen(
     runId: Long,
     onBack: () -> Unit,
+    onGenerateReport: () -> Unit = {},
     viewModel: AnalysisDetailViewModel = viewModel(
         factory = AnalysisDetailViewModel.factory(runId),
     ),
@@ -125,6 +129,7 @@ fun AnalysisDetailScreen(
             is AnalysisDetailState.Loaded -> LoadedContent(
                 run = current.run,
                 linkedLogCount = current.linkedLogIds.size,
+                onGenerateReport = onGenerateReport,
                 modifier = Modifier
                     .padding(padding)
                     .fillMaxSize(),
@@ -210,6 +215,7 @@ private fun NotFoundState(modifier: Modifier = Modifier) {
 private fun LoadedContent(
     run: AnalysisRun,
     linkedLogCount: Int,
+    onGenerateReport: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
     Column(
@@ -221,6 +227,20 @@ private fun LoadedContent(
     ) {
         GuidanceHero(run = run)
         SummaryCard(run = run)
+        // Quick jump to the PDF report — the analysis detail is a
+        // natural "share with my doctor" moment, so surfacing the
+        // report entry point here saves a trip back to Home.
+        Button(
+            onClick = onGenerateReport,
+            modifier = Modifier
+                .fillMaxWidth()
+                .heightIn(min = 52.dp)
+                .testTag("analysis_detail_generate_report"),
+        ) {
+            Icon(Icons.Filled.Description, contentDescription = null)
+            Spacer(Modifier.width(8.dp))
+            Text("Generate health report", fontWeight = FontWeight.SemiBold)
+        }
         LinkedLogsFooter(count = linkedLogCount)
     }
 }

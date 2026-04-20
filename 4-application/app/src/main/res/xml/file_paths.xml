@@ -1,0 +1,12 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  FileProvider paths for sharing generated health reports.
+
+  The report PDF is written under `cacheDir/reports/` by
+  HealthReportPdfGenerator, and then shared via ACTION_SEND using a
+  content:// URI built from this provider. Only the `reports/` subpath
+  is exposed so the rest of the cache remains private.
+-->
+<paths>
+    <cache-path name="health_reports" path="reports/" />
+</paths>

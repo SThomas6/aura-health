@@ -188,4 +188,7 @@ private class StubDao : SymptomLogDao {
     override fun observeById(id: Long) = MutableStateFlow<SymptomLogEntity?>(null).asStateFlow()
     override fun observeCount() = MutableStateFlow(0).asStateFlow()
     override suspend fun delete(id: Long) = Unit
+    override suspend fun listChronologicalAsc(): List<SymptomLogEntity> = emptyList()
+    override suspend fun totalCount(): Int = 0
+    override suspend fun averageSeverity(): Double? = null
 }

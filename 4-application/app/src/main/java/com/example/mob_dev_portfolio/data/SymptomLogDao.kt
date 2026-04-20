@@ -55,6 +55,27 @@ interface SymptomLogDao {
     @Query("SELECT COUNT(*) FROM symptom_logs")
     fun observeCount(): Flow<Int>
 
+    /**
+     * One-shot chronological fetch — **oldest first** — used by the PDF
+     * health report. Kept as a suspending non-Flow so the report builder
+     * can pull a single consistent snapshot of the table without
+     * subscribing to a long-lived Flow.
+     */
+    @Query("SELECT * FROM symptom_logs ORDER BY startEpochMillis ASC")
+    suspend fun listChronologicalAsc(): List<SymptomLogEntity>
+
+    /**
+     * Aggregate helpers pushed down to SQL so the database handles the
+     * `COUNT` / `AVG` without the JVM materialising the whole table.
+     * [averageSeverity] returns `null` when the table is empty (SQLite's
+     * `AVG` on zero rows) — callers must special-case that for display.
+     */
+    @Query("SELECT COUNT(*) FROM symptom_logs")
+    suspend fun totalCount(): Int
+
+    @Query("SELECT AVG(severity) FROM symptom_logs")
+    suspend fun averageSeverity(): Double?
+
     @Query("DELETE FROM symptom_logs WHERE id = :id")
     suspend fun delete(id: Long)
 }
