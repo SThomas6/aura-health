@@ -9,6 +9,8 @@ import androidx.sqlite.db.SupportSQLiteDatabase
 import com.example.mob_dev_portfolio.data.ai.AnalysisRunDao
 import com.example.mob_dev_portfolio.data.ai.AnalysisRunEntity
 import com.example.mob_dev_portfolio.data.ai.AnalysisRunLogCrossRef
+import com.example.mob_dev_portfolio.data.report.ReportArchiveDao
+import com.example.mob_dev_portfolio.data.report.ReportArchiveEntity
 import net.zetetic.database.sqlcipher.SupportOpenHelperFactory
 
 @Database(
@@ -16,8 +18,9 @@ import net.zetetic.database.sqlcipher.SupportOpenHelperFactory
         SymptomLogEntity::class,
         AnalysisRunEntity::class,
         AnalysisRunLogCrossRef::class,
+        ReportArchiveEntity::class,
     ],
-    version = 5,
+    version = 6,
     exportSchema = false,
 )
 abstract class AuraDatabase : RoomDatabase() {
@@ -25,6 +28,8 @@ abstract class AuraDatabase : RoomDatabase() {
     abstract fun symptomLogDao(): SymptomLogDao
 
     abstract fun analysisRunDao(): AnalysisRunDao
+
+    abstract fun reportArchiveDao(): ReportArchiveDao
 
     companion object {
         @Volatile
@@ -107,6 +112,35 @@ abstract class AuraDatabase : RoomDatabase() {
             }
         }
 
+        /**
+         * Adds the `report_archives` table for the PDF Report History &
+         * File Management story. One row per generated PDF, indexed
+         * uniquely on the compressed file name so the generator's
+         * insert-on-success path can use ABORT as a safety net.
+         * `averageSeverity` is REAL + nullable because SQLite's AVG()
+         * returns NULL over zero rows.
+         */
+        val MIGRATION_5_6: Migration = object : Migration(5, 6) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                db.execSQL(
+                    """
+                    CREATE TABLE IF NOT EXISTS report_archives (
+                        id INTEGER PRIMARY KEY AUTOINCREMENT NOT NULL,
+                        compressedFileName TEXT NOT NULL,
+                        generatedAtEpochMillis INTEGER NOT NULL,
+                        uncompressedBytes INTEGER NOT NULL,
+                        compressedBytes INTEGER NOT NULL,
+                        totalLogCount INTEGER NOT NULL,
+                        averageSeverity REAL
+                    )
+                    """.trimIndent(),
+                )
+                db.execSQL(
+                    "CREATE UNIQUE INDEX IF NOT EXISTS index_report_archives_compressedFileName ON report_archives(compressedFileName)",
+                )
+            }
+        }
+
         fun get(context: Context, passphrase: ByteArray): AuraDatabase =
             instance ?: synchronized(this) {
                 instance ?: Room.databaseBuilder(
@@ -115,7 +149,13 @@ abstract class AuraDatabase : RoomDatabase() {
                     "aura.db",
                 )
                     .openHelperFactory(SupportOpenHelperFactory(passphrase.copyOf()))
-                    .addMigrations(MIGRATION_1_2, MIGRATION_2_3, MIGRATION_3_4, MIGRATION_4_5)
+                    .addMigrations(
+                        MIGRATION_1_2,
+                        MIGRATION_2_3,
+                        MIGRATION_3_4,
+                        MIGRATION_4_5,
+                        MIGRATION_5_6,
+                    )
                     .build()
                     .also { instance = it }
             }

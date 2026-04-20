@@ -52,6 +52,15 @@ data class AnalysisDetailRoute(val runId: Long)
 @Serializable
 data object HealthReportRoute
 
+/**
+ * Route for the list of previously generated PDF reports. Reached from
+ * the Health Report screen's action bar; each row opens/shares/deletes
+ * the archive backed by a row in `report_archives` + a compressed
+ * file under `cacheDir/reports/`.
+ */
+@Serializable
+data object HealthReportHistoryRoute
+
 data class TopLevelDestination(
     val route: TopLevelRoute,
     val label: String,

@@ -1,5 +1,6 @@
 package com.example.mob_dev_portfolio.ui.report
 
+import android.content.ClipData
 import android.content.Context
 import android.content.Intent
 import androidx.compose.foundation.background
@@ -22,6 +23,7 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.automirrored.filled.NoteAdd
 import androidx.compose.material.icons.filled.Description
+import androidx.compose.material.icons.filled.History
 import androidx.compose.material.icons.filled.Share
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
@@ -37,6 +39,7 @@ import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
 import androidx.compose.material3.TopAppBar
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -69,21 +72,32 @@ private val GeneratedAtFormat: DateTimeFormatter =
  *     CTA. Nothing exists on disk yet.
  *  2. **Generating** — a determinate loading card so the user knows
  *     the button registered; the CTA is hidden to prevent re-entry.
- *  3. **Ready** — aggregate-metric summary card, then the live PDF
- *     preview rendered page-by-page, then Share/Regenerate actions at
- *     the bottom.
+ *  3. **Ready** — aggregate-metric summary card, a compression stats
+ *     chip (uncompressed vs on-disk bytes), then the live PDF preview,
+ *     then Share/Regenerate actions at the bottom.
  *  4. **Error** — an inline card with a retry button; the report
  *     generation is offline-first so errors here are rare (empty
  *     database is a *valid* state, not an error).
+ *
+ * On dispose the transient uncompressed preview file is cleared so the
+ * disk footprint collapses back to the compressed artifact alone.
  */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun HealthReportScreen(
     onBack: () -> Unit,
+    onOpenHistory: () -> Unit,
     viewModel: HealthReportViewModel = viewModel(factory = HealthReportViewModel.Factory),
 ) {
     val state by viewModel.state.collectAsStateWithLifecycle()
     val context = LocalContext.current
+
+    // When the screen goes away, wipe the transient preview PDF so that
+    // — as required by the storage-optimization acceptance criterion —
+    // the persistent disk footprint is just the compressed artifact.
+    DisposableEffect(Unit) {
+        onDispose { viewModel.clearTransientArtifacts() }
+    }
 
     Scaffold(
         topBar = {
@@ -100,6 +114,22 @@ fun HealthReportScreen(
                         )
                     }
                 },
+                actions = {
+                    // Single entry point into the report history — kept
+                    // in the top bar so it's reachable from every state
+                    // (Idle, Generating, Ready, Error). 48dp IconButton
+                    // is the Material default and satisfies the "≥
+                    // 48x48dp" acceptance criterion.
+                    IconButton(
+                        onClick = onOpenHistory,
+                        modifier = Modifier.testTag("report_open_history"),
+                    ) {
+                        Icon(
+                            Icons.Filled.History,
+                            contentDescription = "Report history",
+                        )
+                    }
+                },
             )
         },
     ) { padding ->
@@ -109,6 +139,7 @@ fun HealthReportScreen(
                     .padding(padding)
                     .fillMaxSize(),
                 onGenerate = viewModel::generate,
+                onOpenHistory = onOpenHistory,
             )
             HealthReportState.Generating -> GeneratingContent(
                 modifier = Modifier
@@ -116,13 +147,13 @@ fun HealthReportScreen(
                     .fillMaxSize(),
             )
             is HealthReportState.Ready -> ReadyContent(
-                snapshot = current.snapshot,
-                file = current.file,
+                ready = current,
                 modifier = Modifier
                     .padding(padding)
                     .fillMaxSize(),
-                onShare = { sharePdf(context, current.file) },
+                onShare = { sharePdf(context, current) },
                 onRegenerate = viewModel::generate,
+                onOpenHistory = onOpenHistory,
             )
             is HealthReportState.Error -> ErrorContent(
                 message = current.message,
@@ -136,7 +167,11 @@ fun HealthReportScreen(
 }
 
 @Composable
-private fun IdleContent(modifier: Modifier = Modifier, onGenerate: () -> Unit) {
+private fun IdleContent(
+    modifier: Modifier = Modifier,
+    onGenerate: () -> Unit,
+    onOpenHistory: () -> Unit,
+) {
     Column(
         modifier = modifier
             .verticalScroll(rememberScrollState())
@@ -171,6 +206,21 @@ private fun IdleContent(modifier: Modifier = Modifier, onGenerate: () -> Unit) {
             Icon(Icons.Filled.Description, contentDescription = null)
             Spacer(Modifier.size(8.dp))
             Text("Generate report", fontWeight = FontWeight.SemiBold)
+        }
+        // Secondary affordance to the history list — sits right below
+        // the primary CTA so it's impossible to miss. The top-bar icon
+        // still works, but relying on that alone wasn't discoverable
+        // enough for most users.
+        OutlinedButton(
+            onClick = onOpenHistory,
+            modifier = Modifier
+                .fillMaxWidth()
+                .heightIn(min = 52.dp)
+                .testTag("report_idle_history_cta"),
+        ) {
+            Icon(Icons.Filled.History, contentDescription = null)
+            Spacer(Modifier.size(8.dp))
+            Text("View past reports")
         }
     }
 }
@@ -272,26 +322,42 @@ private fun GeneratingContent(modifier: Modifier = Modifier) {
 
 @Composable
 private fun ReadyContent(
-    snapshot: ReportSnapshot,
-    file: File,
+    ready: HealthReportState.Ready,
     modifier: Modifier = Modifier,
     onShare: () -> Unit,
     onRegenerate: () -> Unit,
+    onOpenHistory: () -> Unit,
 ) {
     Column(
         modifier = modifier.testTag("report_ready"),
     ) {
         // Top chrome — summary card matches the one rendered at the
         // bottom of the PDF so the user can confirm the numbers before
-        // they share anything.
+        // they share anything, then a compression chip surfacing the
+        // storage optimization.
         Column(
             modifier = Modifier.padding(horizontal = 20.dp, vertical = 12.dp),
             verticalArrangement = Arrangement.spacedBy(12.dp),
         ) {
-            SummaryCard(snapshot = snapshot)
+            SummaryCard(snapshot = ready.snapshot)
+            // Quick jump to the history of previous reports. Keeping it
+            // as an OutlinedButton here (rather than only in the top-bar
+            // icon) so users who haven't noticed the header affordance
+            // still land on it on the way to the share/regenerate row.
+            OutlinedButton(
+                onClick = onOpenHistory,
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .heightIn(min = 48.dp)
+                    .testTag("report_ready_history_cta"),
+            ) {
+                Icon(Icons.Filled.History, contentDescription = null)
+                Spacer(Modifier.size(8.dp))
+                Text("View past reports")
+            }
         }
         PdfPreview(
-            file = file,
+            file = ready.file,
             modifier = Modifier.weight(1f),
             horizontalPadding = 20.dp,
         )
@@ -455,14 +521,36 @@ private fun ErrorContent(
  * FileProvider wraps the app-private file into a `content://` URI with
  * temporary read permission so the receiving app (Gmail, Drive, etc.)
  * can pull the bytes without needing access to the rest of our cache.
+ *
+ * If the transient preview has been evicted (app was backgrounded for
+ * long enough that cache was cleaned), we re-materialise it from the
+ * compressed persistent artifact before firing the intent — so the
+ * share action is robust across cache pressure.
+ *
+ * `ClipData.newUri` is set on the intent in addition to the stream
+ * extra; some share targets (Gmail in particular) read attachments
+ * from `ClipData` rather than `EXTRA_STREAM` when both exist.
  */
-private fun sharePdf(context: Context, file: File) {
+private fun sharePdf(context: Context, ready: HealthReportState.Ready) {
+    val pdf: File = if (ready.file.exists()) {
+        ready.file
+    } else {
+        // Preview was evicted; rebuild from the compressed persistent
+        // copy. The generator is available through the application
+        // container — this is a one-off, synchronous decompress of
+        // a ~100 KB file so blocking here is acceptable.
+        val app = context.applicationContext as com.example.mob_dev_portfolio.AuraApplication
+        app.container.healthReportPdfGenerator.materialisePreview(ready.compressedFile.name)
+            ?: ready.file // last-resort; FileProvider will fail cleanly
+    }
     val authority = "${context.packageName}.fileprovider"
-    val uri = FileProvider.getUriForFile(context, authority, file)
+    val uri = FileProvider.getUriForFile(context, authority, pdf)
     val intent = Intent(Intent.ACTION_SEND).apply {
         type = "application/pdf"
         putExtra(Intent.EXTRA_STREAM, uri)
         putExtra(Intent.EXTRA_SUBJECT, "Aura Health Report")
+        // Some email clients prefer ClipData for attachments.
+        clipData = ClipData.newUri(context.contentResolver, "Aura Health Report", uri)
         addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
     }
     val chooser = Intent.createChooser(intent, "Share report via…").apply {
@@ -470,4 +558,5 @@ private fun sharePdf(context: Context, file: File) {
     }
     context.startActivity(chooser)
 }
+
 

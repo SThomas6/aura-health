@@ -6,6 +6,8 @@ import androidx.lifecycle.viewModelScope
 import androidx.lifecycle.viewmodel.CreationExtras
 import com.example.mob_dev_portfolio.AuraApplication
 import com.example.mob_dev_portfolio.data.report.HealthReportPdfGenerator
+import com.example.mob_dev_portfolio.data.report.ReportArchiveRepository
+import com.example.mob_dev_portfolio.data.report.ReportArtifacts
 import com.example.mob_dev_portfolio.data.report.ReportRepository
 import com.example.mob_dev_portfolio.data.report.ReportSnapshot
 import kotlinx.coroutines.Dispatchers
@@ -23,37 +25,47 @@ import java.io.File
  *  - [Idle]: show the "Generate report" CTA.
  *  - [Generating]: show a non-blocking progress indicator; suppress
  *    the CTA so the user can't double-fire the work.
- *  - [Ready]: show the preview + the export/share action.
- *  - [Error]: show an inline error card with a retry action; the
- *    snapshot may still be null here because we never reached the
- *    write stage.
+ *  - [Ready]: show the preview + the export/share action, plus
+ *    compression stats (uncompressed vs on-disk bytes) so the user
+ *    can see the storage-optimization benefit.
+ *  - [Error]: show an inline error card with a retry action.
  */
 sealed interface HealthReportState {
     data object Idle : HealthReportState
     data object Generating : HealthReportState
     data class Ready(
+        /**
+         * The uncompressed preview PDF — consumed by [android.graphics.pdf.PdfRenderer]
+         * and by the share intent. Materialised out of the persistent
+         * compressed artifact by [HealthReportPdfGenerator.writeToCache].
+         */
         val file: File,
+        /** Persistent on-disk artifact (GZIP-compressed PDF). */
+        val compressedFile: File,
+        val uncompressedBytes: Long,
+        val compressedBytes: Long,
         val snapshot: ReportSnapshot,
-    ) : HealthReportState
+    ) : HealthReportState {
+        val compressionRatio: Double
+            get() = if (uncompressedBytes <= 0L) 0.0
+            else 1.0 - (compressedBytes.toDouble() / uncompressedBytes.toDouble())
+    }
     data class Error(val message: String) : HealthReportState
 }
 
 /**
  * Orchestrates the "generate → preview → share" flow.
  *
- * The PDF write happens on [Dispatchers.IO] to keep the UI thread free
- * for recomposition — PdfDocument is a plain blocking API backed by
- * libpdfium underneath. Everything else is trivially cheap.
- *
- * Why we keep the snapshot alongside the File in [HealthReportState.Ready]:
- * the preview screen wants to surface the aggregate metrics (total
- * count, avg severity) in a live Compose card above the rendered PDF —
- * re-reading them from the PDF bytes would be absurd. The File is for
- * the PdfRenderer + share intent; the snapshot is for chrome.
+ * The PDF write and GZIP compression both happen on [Dispatchers.IO] to
+ * keep the UI thread free for recomposition — PdfDocument and
+ * GZIPOutputStream are both plain blocking APIs. Everything else
+ * (database snapshot, state transitions) is cheap enough to stay on
+ * the main dispatcher.
  */
 class HealthReportViewModel(
     private val repository: ReportRepository,
     private val pdfGenerator: HealthReportPdfGenerator,
+    private val archiveRepository: ReportArchiveRepository,
 ) : ViewModel() {
 
     private val _state = MutableStateFlow<HealthReportState>(HealthReportState.Idle)
@@ -68,10 +80,29 @@ class HealthReportViewModel(
         viewModelScope.launch {
             runCatching {
                 val snapshot = repository.loadReportSnapshot()
-                val file = withContext(Dispatchers.IO) {
+                // Both the render (Canvas) and the compression
+                // (GZIPOutputStream) are blocking, so the whole write is
+                // off-main-thread.
+                val artifacts: ReportArtifacts = withContext(Dispatchers.IO) {
                     pdfGenerator.writeToCache(snapshot)
                 }
-                HealthReportState.Ready(file = file, snapshot = snapshot)
+                // Persist a history row *after* the file lands. If the
+                // insert throws (e.g. the unique index fires because of
+                // a same-millisecond collision — practically impossible
+                // but cheap to handle), we'd rather surface the error
+                // than silently drop the row.
+                archiveRepository.register(
+                    artifacts = artifacts,
+                    totalLogCount = snapshot.totalLogCount,
+                    averageSeverity = snapshot.averageSeverity,
+                )
+                HealthReportState.Ready(
+                    file = artifacts.previewFile,
+                    compressedFile = artifacts.compressedFile,
+                    uncompressedBytes = artifacts.uncompressedBytes,
+                    compressedBytes = artifacts.compressedBytes,
+                    snapshot = snapshot,
+                )
             }.onSuccess { _state.value = it }
                 .onFailure {
                     _state.value = HealthReportState.Error(
@@ -87,6 +118,17 @@ class HealthReportViewModel(
         _state.value = HealthReportState.Idle
     }
 
+    /**
+     * Drop the transient uncompressed preview file. Called from the
+     * screen's onDispose so the on-disk footprint collapses back to
+     * just the compressed artifact.
+     */
+    fun clearTransientArtifacts() {
+        viewModelScope.launch(Dispatchers.IO) {
+            pdfGenerator.clearTransientArtifacts()
+        }
+    }
+
     companion object {
         val Factory: ViewModelProvider.Factory = object : ViewModelProvider.Factory {
             @Suppress("UNCHECKED_CAST")
@@ -96,6 +138,7 @@ class HealthReportViewModel(
                 return HealthReportViewModel(
                     repository = app.container.reportRepository,
                     pdfGenerator = app.container.healthReportPdfGenerator,
+                    archiveRepository = app.container.reportArchiveRepository,
                 ) as T
             }
         }
