@@ -1,12 +1,25 @@
 <?xml version="1.0" encoding="utf-8"?>
 <!--
-  FileProvider paths for sharing generated health reports.
+  FileProvider paths for sharing generated health reports and staging
+  camera captures.
 
-  The report PDF is written under `cacheDir/reports/` by
-  HealthReportPdfGenerator, and then shared via ACTION_SEND using a
-  content:// URI built from this provider. Only the `reports/` subpath
-  is exposed so the rest of the cache remains private.
+  - `reports/` under cacheDir: where HealthReportPdfGenerator writes
+    generated PDFs before sharing via ACTION_SEND.
+
+  - `camera_temp/` under cacheDir: intermediate landing zone for a
+    single photo capture. The TakePicture contract requires a writable
+    URI; the camera app drops the JPEG there, the photo pipeline reads
+    it back, compresses + encrypts into internal storage, and deletes
+    the temp file. Nothing else should ever live in this subpath —
+    keeping it tiny lets the OS reclaim it aggressively under cache
+    pressure without losing a stored photo.
+
+  Only these subpaths are exposed; the rest of cacheDir and the whole
+  of filesDir stay private to this app (so the encrypted photo blobs
+  under filesDir/symptom_photos/ are NOT reachable by any other
+  process via this provider — NFR-PA-02).
 -->
 <paths>
     <cache-path name="health_reports" path="reports/" />
+    <cache-path name="camera_temp" path="camera_temp/" />
 </paths>

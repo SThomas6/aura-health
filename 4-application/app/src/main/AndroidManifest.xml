@@ -11,6 +11,130 @@
     -->
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
 
+    <!--
+        Medication reminders (FR-MR-07).
+
+        `RECEIVE_BOOT_COMPLETED` lets [BootCompletedReceiver] re-arm every
+        persisted schedule after a reboot — without it AlarmManager drops
+        every alarm on shutdown and reminders silently die.
+
+        `SCHEDULE_EXACT_ALARM` (API 31–32) is the user-grantable form of
+        exact-alarm scheduling. `USE_EXACT_ALARM` (API 33+) is the "clock
+        / calendar / reminder" class that the Play Store explicitly
+        sanctions without a runtime toggle, and is the right fit here:
+        the entire feature is user-scheduled reminders at specific
+        wall-clock times. The scheduler also degrades to inexact alarms
+        on SecurityException, so devices that revoke both permissions
+        still get reminders — just with Doze-batched accuracy.
+    -->
+    <uses-permission android:name="android.permission.RECEIVE_BOOT_COMPLETED" />
+    <uses-permission android:name="android.permission.USE_EXACT_ALARM" />
+    <uses-permission
+        android:name="android.permission.SCHEDULE_EXACT_ALARM"
+        android:maxSdkVersion="32" />
+
+    <!--
+        Biometric / device-credential lock over the app. `USE_BIOMETRIC`
+        is a normal permission (no runtime prompt) that lets us invoke
+        the BiometricPrompt API; the AndroidX biometric library handles
+        the PIN/pattern/password fallback when the user enables the
+        lock from Settings on a device without enrolled fingerprint or
+        face. The opt-in lives on a Settings toggle so users who don't
+        want a lock screen never see one.
+    -->
+    <uses-permission android:name="android.permission.USE_BIOMETRIC" />
+
+    <!--
+        Symptom-log photo attachments (FR-PA-02, FR-PA-08).
+
+        CAMERA is a runtime-dangerous permission requested from the
+        log editor only when the user taps the "Take photo" button.
+        Denial degrades gracefully to gallery-only (FR-PA-08) — the
+        editor still works, the camera CTA is just hidden/disabled
+        with a rationale. We deliberately do NOT declare CAMERA as a
+        feature requirement (no <uses-feature>) because a user
+        without a camera should still be able to use every other
+        feature of the app; the Play listing stays installable on
+        camera-less devices.
+
+        No extra permission is needed for the gallery picker:
+        PickVisualMedia is the modern photo-picker contract and
+        handles its own permission-less scoped grant.
+    -->
+    <uses-permission android:name="android.permission.CAMERA" />
+    <uses-feature android:name="android.hardware.camera" android:required="false" />
+    <uses-feature android:name="android.hardware.camera.any" android:required="false" />
+
+    <!--
+        Health Connect read permissions.
+
+        Each one maps to an opt-in toggle in the Health Data Settings
+        screen. READ_* feeds the dashboard + AI prompt; WRITE_* is used
+        only by the debug sample-seeder that populates the user's Health
+        Connect store with two weeks of plausible demo data the first
+        time they connect (so the charts aren't empty).
+
+        Declaring both together matters: Health Connect's permission
+        contract silently drops any requested permission that isn't in
+        the manifest, and — on some provider versions, notably the
+        Samsung/Android 12 HC APK — if ANY of the requested permissions
+        is missing a manifest entry, the whole permission dialog fails
+        to appear (the contract returns immediately with an empty grant
+        set). That manifests to the user as "tapping Connect does
+        nothing", which is why every READ has a matching WRITE below.
+
+        The list is intentionally broader than the MVP catalogue in
+        HealthConnectMetric so new metrics can be wired up without a
+        manifest change. A metric that's declared here but toggled off
+        in-app is simply never queried.
+    -->
+    <uses-permission android:name="android.permission.health.READ_STEPS" />
+    <uses-permission android:name="android.permission.health.READ_HEART_RATE" />
+    <uses-permission android:name="android.permission.health.READ_RESTING_HEART_RATE" />
+    <uses-permission android:name="android.permission.health.READ_SLEEP" />
+    <uses-permission android:name="android.permission.health.READ_HEIGHT" />
+    <uses-permission android:name="android.permission.health.READ_WEIGHT" />
+    <uses-permission android:name="android.permission.health.READ_BODY_FAT" />
+    <uses-permission android:name="android.permission.health.READ_OXYGEN_SATURATION" />
+    <uses-permission android:name="android.permission.health.READ_RESPIRATORY_RATE" />
+    <uses-permission android:name="android.permission.health.READ_ACTIVE_CALORIES_BURNED" />
+    <uses-permission android:name="android.permission.health.READ_EXERCISE" />
+
+    <!--
+        Health Connect write permissions for the sample-seeder. Mirrors
+        the READ_* set above (minus BodyFat, which we read but never
+        write). Without these the seeder's insertRecords calls throw
+        SecurityException and the user sees their own real readings on
+        the dashboard (e.g. 12 steps from a phone they've barely moved)
+        instead of a lived-in demo.
+    -->
+    <uses-permission android:name="android.permission.health.WRITE_STEPS" />
+    <uses-permission android:name="android.permission.health.WRITE_HEART_RATE" />
+    <uses-permission android:name="android.permission.health.WRITE_RESTING_HEART_RATE" />
+    <uses-permission android:name="android.permission.health.WRITE_SLEEP" />
+    <uses-permission android:name="android.permission.health.WRITE_HEIGHT" />
+    <uses-permission android:name="android.permission.health.WRITE_WEIGHT" />
+    <uses-permission android:name="android.permission.health.WRITE_OXYGEN_SATURATION" />
+    <uses-permission android:name="android.permission.health.WRITE_RESPIRATORY_RATE" />
+    <uses-permission android:name="android.permission.health.WRITE_ACTIVE_CALORIES_BURNED" />
+    <uses-permission android:name="android.permission.health.WRITE_EXERCISE" />
+
+    <!--
+        Health Connect package visibility.
+
+        Required on API 30+ because the SDK uses `PackageManager` to
+        check whether the Health Connect provider is installed. Without
+        this the SDK reports "not installed" even when the APK is
+        present, and the "install from Play" CTA would fire on devices
+        that don't need it.
+    -->
+    <queries>
+        <package android:name="com.google.android.apps.healthdata" />
+        <intent>
+            <action android:name="androidx.health.ACTION_SHOW_PERMISSIONS_RATIONALE" />
+        </intent>
+    </queries>
+
     <application
         android:name=".AuraApplication"
         android:allowBackup="true"
@@ -26,12 +150,39 @@
             android:exported="true"
             android:label="@string/app_name"
             android:launchMode="singleTop"
-            android:theme="@style/Theme.AuraHealth">
+            android:theme="@style/Theme.AuraHealth.Starting">
             <intent-filter>
                 <action android:name="android.intent.action.MAIN" />
                 <category android:name="android.intent.category.LAUNCHER" />
             </intent-filter>
+            <!--
+                Health Connect requires apps that request health permissions
+                to advertise a "why we need this" activity so the system
+                settings UI can deep-link into our rationale screen. We
+                route that intent to MainActivity, which then navigates
+                to the Health Data Settings screen via a deep-link event.
+            -->
+            <intent-filter>
+                <action android:name="androidx.health.ACTION_SHOW_PERMISSIONS_RATIONALE" />
+            </intent-filter>
         </activity>
+
+        <!--
+            Declared (on API 33-) rationale activity alias. On API 33 and
+            below the system resolves the permissions-rationale target via
+            a standalone activity rather than an intent filter on the main
+            activity. MainActivity handles both cases.
+        -->
+        <activity-alias
+            android:name="ViewPermissionUsageActivity"
+            android:exported="true"
+            android:targetActivity=".MainActivity"
+            android:permission="android.permission.START_VIEW_PERMISSION_USAGE">
+            <intent-filter>
+                <action android:name="android.intent.action.VIEW_PERMISSION_USAGE" />
+                <category android:name="android.intent.category.HEALTH_PERMISSIONS" />
+            </intent-filter>
+        </activity-alias>
 
         <!--
             FileProvider for sharing generated health-report PDFs.
@@ -39,6 +190,48 @@
             (see res/xml/file_paths.xml) so the rest of the cache stays
             private to this app.
         -->
+        <!--
+            Medication-reminder alarm landing pad. Not exported — the only
+            broadcaster is the AlarmManager alarm we ourselves schedule,
+            addressed by explicit ComponentName (no intent resolution).
+        -->
+        <receiver
+            android:name=".reminders.MedicationReminderReceiver"
+            android:exported="false">
+            <intent-filter>
+                <action android:name="com.example.mob_dev_portfolio.action.MEDICATION_FIRE" />
+            </intent-filter>
+        </receiver>
+
+        <!--
+            Handles Taken / Snooze action-button taps on a live
+            reminder notification. Not exported — PendingIntents from
+            our own notification builder are the only caller.
+        -->
+        <receiver
+            android:name=".reminders.MedicationActionReceiver"
+            android:exported="false">
+            <intent-filter>
+                <action android:name="com.example.mob_dev_portfolio.action.MED_TAKEN" />
+                <action android:name="com.example.mob_dev_portfolio.action.MED_SNOOZE" />
+            </intent-filter>
+        </receiver>
+
+        <!--
+            Re-arms every persisted medication reminder after a reboot or
+            self-update. Must be exported=true so the system's boot
+            broadcaster can deliver ACTION_BOOT_COMPLETED.
+        -->
+        <receiver
+            android:name=".reminders.BootCompletedReceiver"
+            android:exported="true">
+            <intent-filter>
+                <action android:name="android.intent.action.BOOT_COMPLETED" />
+                <action android:name="android.intent.action.LOCKED_BOOT_COMPLETED" />
+                <action android:name="android.intent.action.MY_PACKAGE_REPLACED" />
+            </intent-filter>
+        </receiver>
+
         <provider
             android:name="androidx.core.content.FileProvider"
             android:authorities="${applicationId}.fileprovider"

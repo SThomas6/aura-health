@@ -1,6 +1,11 @@
 package com.example.mob_dev_portfolio.data
 
 object SymptomCatalog {
+    /** Sentinel the picker inserts at the bottom of the preset list to
+     *  switch the field into free-text mode. Kept as a constant so the
+     *  picker and any tests stay in sync on the wording. */
+    const val OTHER: String = "Other"
+
     val presets: List<String> = listOf(
         "Headache",
         "Migraine",

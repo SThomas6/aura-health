@@ -7,10 +7,15 @@ import androidx.lifecycle.viewmodel.CreationExtras
 import com.example.mob_dev_portfolio.AuraApplication
 import com.example.mob_dev_portfolio.data.SymptomLog
 import com.example.mob_dev_portfolio.data.SymptomLogRepository
+import com.example.mob_dev_portfolio.data.doctor.DoctorVisitRepository
+import com.example.mob_dev_portfolio.data.doctor.LogDoctorAnnotation
+import com.example.mob_dev_portfolio.data.photo.SymptomPhoto
+import com.example.mob_dev_portfolio.data.photo.SymptomPhotoRepository
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.flowOf
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.flow.update
@@ -32,6 +37,20 @@ data class LogDetailUiState(
 class LogDetailViewModel(
     private val id: Long,
     private val repository: SymptomLogRepository,
+    /**
+     * Exposed so the detail screen can render the photo gallery +
+     * fullscreen viewer. Nullable so tests that don't care about
+     * photos (older doubles) still compile — we fall back to an empty
+     * flow rather than spinning up a fake repo.
+     */
+    private val photoRepository: SymptomPhotoRepository? = null,
+    /**
+     * Doctor-visit lookup for the "cleared" / "linked to diagnosis"
+     * badge shown at the top of the detail. Nullable so test doubles
+     * that don't care about doctor-visit data still compile — the
+     * screen falls back to rendering no badge when the repo is absent.
+     */
+    private val doctorVisitRepository: DoctorVisitRepository? = null,
 ) : ViewModel() {
 
     val log: StateFlow<DetailLogState> = repository.observeById(id)
@@ -39,6 +58,26 @@ class LogDetailViewModel(
             if (loaded == null) DetailLogState.NotFound else DetailLogState.Loaded(loaded)
         }
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000L), DetailLogState.Loading)
+
+    /**
+     * Photos attached to this log. Sorted by capture time (the repo's
+     * DAO already returns ASC by createdAtEpochMillis) so the gallery
+     * always shows oldest-first, matching the PDF report layout.
+     */
+    val photos: StateFlow<List<SymptomPhoto>> =
+        (photoRepository?.observeForLog(id) ?: flowOf(emptyList()))
+            .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000L), emptyList())
+
+    /**
+     * Doctor-visit annotation for this log, or null. Emits
+     * [LogDoctorAnnotation.Cleared] if the user has ticked this log
+     * as reviewed, or [LogDoctorAnnotation.LinkedToDiagnosis] if it's
+     * pinned to a diagnosis. Rendered as a tap-through badge at the
+     * top of the detail body.
+     */
+    val doctorAnnotation: StateFlow<LogDoctorAnnotation?> =
+        (doctorVisitRepository?.observeLogAnnotation(id) ?: flowOf(null))
+            .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000L), null)
 
     private val _state = MutableStateFlow(LogDetailUiState())
     val state: StateFlow<LogDetailUiState> = _state.asStateFlow()
@@ -82,7 +121,12 @@ class LogDetailViewModel(
             @Suppress("UNCHECKED_CAST")
             override fun <T : ViewModel> create(modelClass: Class<T>, extras: CreationExtras): T {
                 val app = extras[ViewModelProvider.AndroidViewModelFactory.APPLICATION_KEY] as AuraApplication
-                return LogDetailViewModel(id, app.container.symptomLogRepository) as T
+                return LogDetailViewModel(
+                    id = id,
+                    repository = app.container.symptomLogRepository,
+                    photoRepository = app.container.symptomPhotoRepository,
+                    doctorVisitRepository = app.container.doctorVisitRepository,
+                ) as T
             }
         }
     }

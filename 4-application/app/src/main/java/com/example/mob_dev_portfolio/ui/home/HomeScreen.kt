@@ -4,7 +4,6 @@ import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
-import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
@@ -21,13 +20,12 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Add
-import androidx.compose.material.icons.filled.ArrowForward
 import androidx.compose.material.icons.filled.BarChart
-import androidx.compose.material.icons.filled.Check
-import androidx.compose.material.icons.filled.DarkMode
-import androidx.compose.material.icons.filled.LightMode
+import androidx.compose.material.icons.filled.Description
+import androidx.compose.material.icons.filled.History
+import androidx.compose.material.icons.filled.Medication
 import androidx.compose.material.icons.filled.MonitorHeart
-import androidx.compose.material.icons.filled.SettingsBrightness
+import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material.icons.outlined.ChevronRight
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
@@ -38,17 +36,10 @@ import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Scaffold
-import androidx.compose.material3.SegmentedButton
-import androidx.compose.material3.SegmentedButtonDefaults
-import androidx.compose.material3.SingleChoiceSegmentedButtonRow
-import androidx.compose.material3.SnackbarDuration
 import androidx.compose.material3.SnackbarHost
 import androidx.compose.material3.SnackbarHostState
-import androidx.compose.material3.SnackbarResult
 import androidx.compose.material3.Text
-import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
-import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
@@ -64,18 +55,17 @@ import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
-import androidx.compose.ui.unit.sp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewmodel.compose.viewModel
 import com.example.mob_dev_portfolio.data.SymptomLog
-import com.example.mob_dev_portfolio.data.preferences.ThemeMode
+import com.example.mob_dev_portfolio.data.health.HealthConnectMetric
+import com.example.mob_dev_portfolio.ui.health.HealthDashboardSection
 import com.example.mob_dev_portfolio.ui.components.SeverityEdge
 import com.example.mob_dev_portfolio.ui.components.SeverityPill
 import com.example.mob_dev_portfolio.ui.components.SeverityRing
 import com.example.mob_dev_portfolio.ui.components.auraHeroGradient
-import com.example.mob_dev_portfolio.ui.theme.AuraInk
 import com.example.mob_dev_portfolio.ui.theme.AuraMonoFamily
-import com.example.mob_dev_portfolio.ui.theme.severityColor
+import com.example.mob_dev_portfolio.ui.trends.TrendPreviewCard
 import java.time.Instant
 import java.time.ZoneId
 import java.time.format.DateTimeFormatter
@@ -98,29 +88,15 @@ fun HomeScreen(
     onViewHistoryClick: () -> Unit,
     onOpenLog: (Long) -> Unit,
     onGenerateReport: () -> Unit,
+    onOpenTrends: () -> Unit,
+    onOpenSettings: () -> Unit,
+    onOpenMedications: () -> Unit,
+    onOpenHealthMetric: (HealthConnectMetric) -> Unit,
     viewModel: HomeViewModel = viewModel(factory = HomeViewModel.Factory),
-    themeViewModel: ThemePrefsViewModel = viewModel(factory = ThemePrefsViewModel.Factory),
 ) {
     val logs by viewModel.logs.collectAsStateWithLifecycle()
     val insights by viewModel.insights.collectAsStateWithLifecycle()
-    val themeMode by themeViewModel.themeMode.collectAsStateWithLifecycle()
-    val themeError by themeViewModel.error.collectAsStateWithLifecycle()
     val snackbarHost = remember { SnackbarHostState() }
-
-    LaunchedEffect(themeError) {
-        themeError?.let { error ->
-            val result = snackbarHost.showSnackbar(
-                message = error.message,
-                actionLabel = "Retry",
-                duration = SnackbarDuration.Long,
-            )
-            if (result == SnackbarResult.ActionPerformed) {
-                themeViewModel.retryLastError()
-            } else {
-                themeViewModel.dismissError()
-            }
-        }
-    }
 
     Scaffold(
         containerColor = MaterialTheme.colorScheme.background,
@@ -137,21 +113,53 @@ fun HomeScreen(
             GreetingRow()
             HeroCard(logCount = logs.size, onLogSymptomClick = onLogSymptomClick)
             InsightsDashboard(insights = insights)
+            // Trends preview — above health data, below insights, per
+            // the dashboard-IA decision. The whole card is the tap
+            // target (the graph itself opens the fullscreen page), so
+            // we drop the separate "View trends" row that used to sit
+            // below health data.
+            TrendPreviewCard(onOpenFull = onOpenTrends)
+            HealthDashboardSection(onOpenMetric = onOpenHealthMetric)
             QuickActionCard(
                 title = "View history",
                 subtitle = "Review and search your past logs",
                 onClick = onViewHistoryClick,
+                leadingIcon = Icons.Filled.History,
             )
             // PDF report generation — entirely offline. The card lives
             // on Home rather than as a top-level tab so we don't grow
-            // the nav rail past its four-item ergonomic sweet spot.
+            // the nav rail past its four-item ergonomic sweet spot. The
+            // leading icon was added after user feedback that a plain
+            // two-line card felt indistinguishable from the other tiles.
+            // Medication reminders entry point. Kept above the report
+            // card because the daily-check-in pattern benefits from
+            // seeing "next dose" and "past 30 days" one tap from home.
+            QuickActionCard(
+                title = "Medication reminders",
+                subtitle = "Schedule doses, track taken / missed, view 30-day history.",
+                onClick = onOpenMedications,
+                testTag = "home_medications",
+                leadingIcon = Icons.Filled.Medication,
+            )
             QuickActionCard(
                 title = "Generate health report",
                 subtitle = "Export a PDF summary for your doctor. Works offline.",
                 onClick = onGenerateReport,
                 testTag = "home_generate_report",
+                leadingIcon = Icons.Filled.Description,
             )
-            ThemePickerCard(current = themeMode, onSelect = themeViewModel::setThemeMode)
+            // Everything configurable (theme, demographic profile, Health
+            // Connect integration) lives behind a single Settings entry
+            // now — the three individual tiles felt like clutter on a
+            // screen whose job is the daily check-in. Tapping here lands
+            // on SettingsScreen.
+            QuickActionCard(
+                title = "Settings",
+                subtitle = "Appearance, demographic profile, Health Connect integration.",
+                onClick = onOpenSettings,
+                testTag = "home_settings",
+                leadingIcon = Icons.Filled.Settings,
+            )
             if (logs.isNotEmpty()) {
                 Row(verticalAlignment = Alignment.CenterVertically) {
                     Text(
@@ -206,6 +214,12 @@ private fun GreetingRow() {
 
 @Composable
 private fun HeroCard(logCount: Int, onLogSymptomClick: () -> Unit) {
+    // Second tightening pass after the user reported it "dominated the
+    // screen". Shape, gradient and label hierarchy are preserved so the
+    // card still reads as the primary CTA, but padding, typography scale,
+    // inter-line gap, body copy and button height are all stepped down.
+    // The tagline was dropped — the stat line + button label already
+    // communicate the intent without a third line of marketing copy.
     Card(
         shape = MaterialTheme.shapes.extraLarge,
         colors = CardDefaults.cardColors(containerColor = Color.Transparent),
@@ -215,40 +229,47 @@ private fun HeroCard(logCount: Int, onLogSymptomClick: () -> Unit) {
             modifier = Modifier
                 .fillMaxWidth()
                 .background(auraHeroGradient())
-                .padding(24.dp),
+                .padding(horizontal = 18.dp, vertical = 16.dp),
         ) {
-            Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
-                Text(
-                    "THIS WEEK",
-                    style = MaterialTheme.typography.labelMedium,
-                    color = Color.White.copy(alpha = 0.78f),
-                )
-                Text(
-                    text = if (logCount == 0) "Start tracking\nyour health." else "$logCount ${if (logCount == 1) "entry" else "entries"}\nlogged",
-                    style = MaterialTheme.typography.displaySmall,
-                    color = Color.White,
-                    lineHeight = 34.sp,
-                )
-                Text(
-                    "Log symptoms as they happen so patterns become easier to spot.",
-                    style = MaterialTheme.typography.bodyMedium,
-                    color = Color.White.copy(alpha = 0.82f),
-                )
-                Spacer(Modifier.height(4.dp))
+            Row(
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(14.dp),
+            ) {
+                Column(
+                    modifier = Modifier.weight(1f),
+                    verticalArrangement = Arrangement.spacedBy(2.dp),
+                ) {
+                    Text(
+                        "THIS WEEK",
+                        style = MaterialTheme.typography.labelSmall,
+                        color = Color.White.copy(alpha = 0.78f),
+                    )
+                    Text(
+                        text = if (logCount == 0) "Start tracking"
+                        else "$logCount ${if (logCount == 1) "entry" else "entries"}",
+                        style = MaterialTheme.typography.titleLarge,
+                        color = Color.White,
+                        fontWeight = FontWeight.SemiBold,
+                    )
+                }
                 Button(
                     onClick = onLogSymptomClick,
                     colors = ButtonDefaults.buttonColors(
                         containerColor = Color.White,
                         contentColor = MaterialTheme.colorScheme.primary,
                     ),
+                    contentPadding = PaddingValues(horizontal = 16.dp, vertical = 10.dp),
                     modifier = Modifier
-                        .fillMaxWidth()
-                        .heightIn(min = 52.dp)
+                        .heightIn(min = 44.dp)
                         .testTag("btn_home_log"),
                 ) {
-                    Icon(Icons.Filled.Add, contentDescription = null)
-                    Spacer(Modifier.size(8.dp))
-                    Text("Log a symptom", fontWeight = FontWeight.SemiBold)
+                    Icon(
+                        Icons.Filled.Add,
+                        contentDescription = null,
+                        modifier = Modifier.size(18.dp),
+                    )
+                    Spacer(Modifier.size(6.dp))
+                    Text("Log", fontWeight = FontWeight.SemiBold)
                 }
             }
         }
@@ -261,6 +282,7 @@ private fun QuickActionCard(
     subtitle: String,
     onClick: () -> Unit,
     testTag: String? = null,
+    leadingIcon: androidx.compose.ui.graphics.vector.ImageVector? = null,
 ) {
     Card(
         onClick = onClick,
@@ -275,6 +297,26 @@ private fun QuickActionCard(
             modifier = Modifier.padding(16.dp),
             verticalAlignment = Alignment.CenterVertically,
         ) {
+            if (leadingIcon != null) {
+                // Tinted square behind the glyph echoes the StatBlock
+                // treatment in the insights card so these "go somewhere"
+                // rows read as a consistent family.
+                Box(
+                    modifier = Modifier
+                        .size(40.dp)
+                        .clip(RoundedCornerShape(12.dp))
+                        .background(MaterialTheme.colorScheme.primaryContainer),
+                    contentAlignment = Alignment.Center,
+                ) {
+                    Icon(
+                        leadingIcon,
+                        contentDescription = null,
+                        tint = MaterialTheme.colorScheme.onPrimaryContainer,
+                        modifier = Modifier.size(22.dp),
+                    )
+                }
+                Spacer(Modifier.size(14.dp))
+            }
             Column(modifier = Modifier.weight(1f)) {
                 Text(title, style = MaterialTheme.typography.titleMedium)
                 Text(
@@ -291,74 +333,6 @@ private fun QuickActionCard(
         }
     }
 }
-
-@OptIn(ExperimentalMaterial3Api::class)
-@Composable
-private fun ThemePickerCard(current: ThemeMode, onSelect: (ThemeMode) -> Unit) {
-    val options = listOf(
-        ThemeModeOption(ThemeMode.System, "System", Icons.Filled.SettingsBrightness),
-        ThemeModeOption(ThemeMode.Light, "Light", Icons.Filled.LightMode),
-        ThemeModeOption(ThemeMode.Dark, "Dark", Icons.Filled.DarkMode),
-    )
-    Card(
-        shape = MaterialTheme.shapes.large,
-        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
-        modifier = Modifier.fillMaxWidth(),
-    ) {
-        Column(
-            modifier = Modifier.padding(16.dp),
-            verticalArrangement = Arrangement.spacedBy(10.dp),
-        ) {
-            Text("Appearance", style = MaterialTheme.typography.titleMedium)
-            SingleChoiceSegmentedButtonRow(modifier = Modifier.fillMaxWidth()) {
-                options.forEachIndexed { index, option ->
-                    val selected = option.mode == current
-                    SegmentedButton(
-                        selected = selected,
-                        onClick = { onSelect(option.mode) },
-                        shape = SegmentedButtonDefaults.itemShape(index = index, count = options.size),
-                        icon = {
-                            SegmentedButtonDefaults.Icon(
-                                active = selected,
-                                activeContent = {
-                                    Icon(
-                                        Icons.Filled.Check,
-                                        contentDescription = null,
-                                        modifier = Modifier.size(SegmentedButtonDefaults.IconSize),
-                                    )
-                                },
-                                inactiveContent = {
-                                    Icon(
-                                        option.icon,
-                                        contentDescription = null,
-                                        modifier = Modifier.size(SegmentedButtonDefaults.IconSize),
-                                    )
-                                },
-                            )
-                        },
-                        modifier = Modifier
-                            .heightIn(min = 48.dp)
-                            .testTag("theme_${option.mode.name.lowercase()}"),
-                        label = {
-                            Text(
-                                option.label,
-                                maxLines = 1,
-                                overflow = TextOverflow.Ellipsis,
-                                style = MaterialTheme.typography.labelLarge,
-                            )
-                        },
-                    )
-                }
-            }
-        }
-    }
-}
-
-private data class ThemeModeOption(
-    val mode: ThemeMode,
-    val label: String,
-    val icon: androidx.compose.ui.graphics.vector.ImageVector,
-)
 
 @Composable
 private fun InsightsDashboard(insights: HomeInsights) {

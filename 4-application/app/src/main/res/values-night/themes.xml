@@ -5,4 +5,14 @@
         <item name="android:navigationBarColor">@android:color/transparent</item>
         <item name="android:statusBarColor">@android:color/transparent</item>
     </style>
+
+    <!--
+        Dark-mode splash backdrop. Same icon, darker teal so the panel
+        blends with OLED wallpapers and doesn't bloom on first launch.
+    -->
+    <style name="Theme.AuraHealth.Starting" parent="Theme.SplashScreen">
+        <item name="windowSplashScreenBackground">@color/aura_brand_teal_dark</item>
+        <item name="windowSplashScreenAnimatedIcon">@mipmap/ic_launcher</item>
+        <item name="postSplashScreenTheme">@style/Theme.AuraHealth</item>
+    </style>
 </resources>

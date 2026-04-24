@@ -1,6 +1,7 @@
 package com.example.mob_dev_portfolio.ui.detail
 
 import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -23,8 +24,10 @@ import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
+import androidx.compose.material.icons.filled.CheckCircle
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.Edit
+import androidx.compose.material.icons.filled.MedicalServices
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.AssistChip
 import androidx.compose.material3.Button
@@ -55,9 +58,15 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.platform.LocalContext
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewmodel.compose.viewModel
+import com.example.mob_dev_portfolio.AuraApplication
 import com.example.mob_dev_portfolio.data.SymptomLog
+import com.example.mob_dev_portfolio.data.doctor.LogDoctorAnnotation
+import com.example.mob_dev_portfolio.data.photo.SymptomPhoto
+import com.example.mob_dev_portfolio.data.photo.SymptomPhotoRepository
+import com.example.mob_dev_portfolio.ui.log.PhotoAttachmentsGallery
 import com.example.mob_dev_portfolio.ui.theme.AuraInk
 import com.example.mob_dev_portfolio.ui.theme.AuraMonoFamily
 import com.example.mob_dev_portfolio.ui.theme.severityColor
@@ -75,11 +84,18 @@ fun LogDetailScreen(
     onBack: () -> Unit,
     onEdit: (Long) -> Unit,
     onDeleted: () -> Unit,
+    onOpenVisit: (Long) -> Unit = {},
     viewModel: LogDetailViewModel = viewModel(factory = LogDetailViewModel.factory(id)),
 ) {
     val log by viewModel.log.collectAsStateWithLifecycle()
     val ui by viewModel.state.collectAsStateWithLifecycle()
+    val photos by viewModel.photos.collectAsStateWithLifecycle()
+    val doctorAnnotation by viewModel.doctorAnnotation.collectAsStateWithLifecycle()
     val snackbarHost = remember { SnackbarHostState() }
+    val context = LocalContext.current
+    val photoRepository = remember {
+        (context.applicationContext as AuraApplication).container.symptomPhotoRepository
+    }
 
     LaunchedEffect(ui.deleted) {
         if (ui.deleted) onDeleted()
@@ -130,9 +146,13 @@ fun LogDetailScreen(
                 }
             is DetailLogState.Loaded -> DetailContent(
                 log = current.log,
+                photos = photos,
+                photoRepository = photoRepository,
+                doctorAnnotation = doctorAnnotation,
                 isDeleting = ui.isDeleting,
                 onEdit = { onEdit(id) },
                 onDelete = viewModel::requestDelete,
+                onOpenVisit = onOpenVisit,
                 modifier = Modifier.padding(padding),
             )
         }
@@ -203,9 +223,13 @@ private fun NotFoundState(onBack: () -> Unit, modifier: Modifier = Modifier) {
 @Composable
 private fun DetailContent(
     log: SymptomLog,
+    photos: List<SymptomPhoto>,
+    photoRepository: SymptomPhotoRepository,
+    doctorAnnotation: LogDoctorAnnotation?,
     isDeleting: Boolean,
     onEdit: () -> Unit,
     onDelete: () -> Unit,
+    onOpenVisit: (Long) -> Unit,
     modifier: Modifier = Modifier,
 ) {
     val zone = ZoneId.systemDefault()
@@ -220,6 +244,13 @@ private fun DetailContent(
             .testTag("detail_content"),
         verticalArrangement = Arrangement.spacedBy(16.dp),
     ) {
+        doctorAnnotation?.let { annotation ->
+            DoctorAnnotationBadge(
+                annotation = annotation,
+                onClick = { onOpenVisit(annotation.visit.id) },
+            )
+        }
+
         SeverityHeroCard(
             symptomName = log.symptomName,
             severity = log.severity,
@@ -271,6 +302,17 @@ private fun DetailContent(
                 label = "Approximate location",
                 value = log.locationName?.takeIf { it.isNotBlank() } ?: "Location unavailable",
                 testTag = "detail_location",
+            )
+        }
+
+        // FR-PA-04 — photo gallery. Read-only strip with fullscreen on
+        // tap; add/remove lives on the edit screen. Only renders when
+        // there's at least one photo, so logs without attachments look
+        // exactly as before.
+        if (photos.isNotEmpty()) {
+            PhotoAttachmentsGallery(
+                photos = photos,
+                photoRepository = photoRepository,
             )
         }
 
@@ -463,6 +505,69 @@ private fun formatDuration(startMillis: Long, endMillis: Long?): String? {
         else -> "${minutes}m"
     }
 }
+
+/**
+ * Tap-through badge shown above the hero when this log has been
+ * cleared by a doctor visit or linked to one of its diagnoses. Tapping
+ * it opens the source visit so the user can see why the AI treats the
+ * log differently.
+ */
+@Composable
+private fun DoctorAnnotationBadge(
+    annotation: LogDoctorAnnotation,
+    onClick: () -> Unit,
+) {
+    val (icon, headline, subtext, tag) = when (annotation) {
+        is LogDoctorAnnotation.Cleared -> BadgeContent(
+            icon = Icons.Filled.CheckCircle,
+            headline = "Reviewed & cleared",
+            subtext = "The AI ignores this log in future analyses.",
+            tag = "detail_annotation_cleared",
+        )
+        is LogDoctorAnnotation.LinkedToDiagnosis -> BadgeContent(
+            icon = Icons.Filled.MedicalServices,
+            headline = "Linked to: ${annotation.diagnosis.label.ifBlank { "(unlabelled issue)" }}",
+            subtext = "The AI treats this as already-explained context.",
+            tag = "detail_annotation_linked",
+        )
+    }
+    Surface(
+        color = MaterialTheme.colorScheme.secondaryContainer,
+        contentColor = MaterialTheme.colorScheme.onSecondaryContainer,
+        shape = RoundedCornerShape(16.dp),
+        modifier = Modifier
+            .fillMaxWidth()
+            .clip(RoundedCornerShape(16.dp))
+            .clickable(onClick = onClick)
+            .testTag(tag),
+    ) {
+        Row(
+            modifier = Modifier.padding(horizontal = 16.dp, vertical = 12.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Icon(icon, contentDescription = null)
+            Spacer(Modifier.width(12.dp))
+            Column(modifier = Modifier.weight(1f)) {
+                Text(
+                    headline,
+                    style = MaterialTheme.typography.titleSmall,
+                    fontWeight = FontWeight.SemiBold,
+                )
+                Text(
+                    subtext,
+                    style = MaterialTheme.typography.bodySmall,
+                )
+            }
+        }
+    }
+}
+
+private data class BadgeContent(
+    val icon: androidx.compose.ui.graphics.vector.ImageVector,
+    val headline: String,
+    val subtext: String,
+    val tag: String,
+)
 
 @Composable
 private fun DetailRow(label: String, value: String, testTag: String) {

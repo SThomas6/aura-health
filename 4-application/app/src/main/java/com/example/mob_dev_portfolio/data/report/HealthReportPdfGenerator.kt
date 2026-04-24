@@ -1,15 +1,19 @@
 package com.example.mob_dev_portfolio.data.report
 
 import android.content.Context
+import android.graphics.Bitmap
+import android.graphics.BitmapFactory
 import android.graphics.Canvas
 import android.graphics.Color
 import android.graphics.Paint
+import android.graphics.Rect
 import android.graphics.RectF
 import android.graphics.Typeface
 import android.graphics.pdf.PdfDocument
 import android.text.Layout
 import android.text.StaticLayout
 import android.text.TextPaint
+import com.example.mob_dev_portfolio.data.ai.AnalysisSummaryFormatter
 import java.io.BufferedInputStream
 import java.io.BufferedOutputStream
 import java.io.ByteArrayOutputStream
@@ -430,8 +434,8 @@ class HealthReportPdfGenerator(
             ensureSpace(72f)
             val canvas = currentCanvas ?: return
 
-            canvas.drawText(
-                log.symptomName.ifBlank { "Untitled symptom" },
+            drawSingleLineViaBitmap(
+                sanitizeForPdf(log.symptomName.ifBlank { "Untitled symptom" }),
                 marginX,
                 currentY + 12f,
                 entryTitlePaint,
@@ -443,28 +447,37 @@ class HealthReportPdfGenerator(
             val metaPieces = mutableListOf<String>()
             metaPieces += "Started ${formatInstant(log.startEpochMillis)}"
             log.endEpochMillis?.let { metaPieces += "Ended ${formatInstant(it)}" }
-            if (!log.locationName.isNullOrBlank()) metaPieces += log.locationName
+            if (!log.locationName.isNullOrBlank()) metaPieces += sanitizeForPdf(log.locationName)
             if (!log.weatherDescription.isNullOrBlank()) {
                 val temp = log.temperatureCelsius?.let { " (${"%.1f".format(it)}°C)" } ?: ""
-                metaPieces += "${log.weatherDescription}$temp"
+                metaPieces += "${sanitizeForPdf(log.weatherDescription)}$temp"
             }
             drawWrappedText(metaPieces.joinToString("  ·  "), metaPaint)
 
             if (log.description.isNotBlank()) {
                 drawSpacer(3f)
-                drawWrappedText(log.description, bodyPaint)
+                drawWrappedText(sanitizeForPdf(log.description), bodyPaint)
             }
             if (log.notes.isNotBlank()) {
                 drawSpacer(3f)
-                drawLabelledParagraph("Notes", log.notes)
+                drawLabelledParagraph("Notes", sanitizeForPdf(log.notes))
             }
             if (log.medication.isNotBlank()) {
                 drawSpacer(3f)
-                drawLabelledParagraph("Medication", log.medication)
+                drawLabelledParagraph("Medication", sanitizeForPdf(log.medication))
             }
             if (log.contextTags.isNotBlank()) {
                 drawSpacer(3f)
-                drawLabelledParagraph("Context", log.contextTags.replace("|", ", "))
+                drawLabelledParagraph("Context", sanitizeForPdf(log.contextTags.replace("|", ", ")))
+            }
+            // FR-PA-06 — photo thumbnails row. Each attachment is
+            // decoded at a small sample size (the stored photo is up to
+            // 1920px; we only need ~240px for a PDF thumb) so the
+            // embedded raster payload stays well inside the 10 MB
+            // NFR-PA-06 budget even with many logs.
+            if (log.photoJpegBytes.isNotEmpty()) {
+                drawSpacer(4f)
+                drawPhotoRow(log.photoJpegBytes)
             }
             // Subtle rule between entries.
             drawSpacer(8f)
@@ -474,14 +487,123 @@ class HealthReportPdfGenerator(
             currentY += 10f
         }
 
+        /**
+         * Renders up to 3 thumbnails in a row, each a fixed-height
+         * landscape box with aspect-preserving crop. A row flows to a
+         * new page when it can't fit on the current one.
+         *
+         * Memory notes: each decode uses [BitmapFactory.Options.inSampleSize]
+         * to divide the source dimensions before allocation, so we never
+         * materialise the full 1920px buffer just to draw a 240px
+         * thumbnail. The bitmap is recycled immediately after
+         * drawBitmap hands the pixels off to the PDF canvas.
+         */
+        private fun drawPhotoRow(photos: List<ByteArray>) {
+            if (photos.isEmpty()) return
+            val rowHeight = PHOTO_HEIGHT_PT + PHOTO_CAPTION_HEIGHT_PT
+            ensureSpace(rowHeight)
+            val canvas = currentCanvas ?: return
+
+            // "Photos" label first so the reader knows what they're
+            // looking at. Tiny caption paint — matches "Medication" /
+            // "Notes" labels above.
+            drawSingleLineViaBitmap("Photos", marginX, currentY + 10f, labelPaint)
+            currentY += PHOTO_CAPTION_HEIGHT_PT
+
+            val gap = 8f
+            val maxPerRow = 3
+            val available = printableWidth
+            val tileWidth = ((available - gap * (maxPerRow - 1)) / maxPerRow).coerceAtLeast(40f)
+            val tileHeight = PHOTO_HEIGHT_PT
+
+            photos.take(maxPerRow).forEachIndexed { index, jpegBytes ->
+                val x = marginX + index * (tileWidth + gap)
+                val rect = RectF(x, currentY, x + tileWidth, currentY + tileHeight)
+                // Background rect so a decode-failure still leaves a
+                // visible "something was here" tile.
+                fillPaint.color = COLOR_RULE_SOFT
+                canvas.drawRoundRect(rect, 6f, 6f, fillPaint)
+
+                val bitmap = decodePhotoThumbnail(jpegBytes, tileWidth.toInt(), tileHeight.toInt())
+                if (bitmap != null) {
+                    val clipPath = android.graphics.Path().apply {
+                        addRoundRect(rect, 6f, 6f, android.graphics.Path.Direction.CW)
+                    }
+                    canvas.save()
+                    canvas.clipPath(clipPath)
+                    // Aspect-preserving centre crop into the tile rect.
+                    val srcW = bitmap.width
+                    val srcH = bitmap.height
+                    val srcAspect = srcW.toFloat() / srcH.toFloat()
+                    val dstAspect = tileWidth / tileHeight
+                    val src = if (srcAspect > dstAspect) {
+                        val cropW = (srcH * dstAspect).toInt()
+                        val x0 = (srcW - cropW) / 2
+                        Rect(x0, 0, x0 + cropW, srcH)
+                    } else {
+                        val cropH = (srcW / dstAspect).toInt()
+                        val y0 = (srcH - cropH) / 2
+                        Rect(0, y0, srcW, y0 + cropH)
+                    }
+                    canvas.drawBitmap(bitmap, src, rect, null)
+                    canvas.restore()
+                    bitmap.recycle()
+                }
+            }
+            currentY += tileHeight
+        }
+
+        /**
+         * Memory-conscious JPEG → downscaled [Bitmap] decoder. Reads the
+         * bounds first, computes a power-of-two `inSampleSize` that
+         * satisfies the requested pixel box, then allocates only that
+         * smaller buffer. Returns null on any decode failure — the
+         * caller renders a placeholder rectangle instead.
+         */
+        private fun decodePhotoThumbnail(
+            jpegBytes: ByteArray,
+            targetWidthPx: Int,
+            targetHeightPx: Int,
+        ): Bitmap? {
+            val bounds = BitmapFactory.Options().apply { inJustDecodeBounds = true }
+            BitmapFactory.decodeByteArray(jpegBytes, 0, jpegBytes.size, bounds)
+            if (bounds.outWidth <= 0 || bounds.outHeight <= 0) return null
+            var sample = 1
+            // Aim for ~2x the target so the final crop stays crisp.
+            val targetW = targetWidthPx.coerceAtLeast(1) * 2
+            val targetH = targetHeightPx.coerceAtLeast(1) * 2
+            while (bounds.outWidth / (sample * 2) >= targetW &&
+                bounds.outHeight / (sample * 2) >= targetH
+            ) {
+                sample *= 2
+            }
+            val opts = BitmapFactory.Options().apply {
+                inSampleSize = sample
+                inPreferredConfig = Bitmap.Config.ARGB_8888
+            }
+            return runCatching {
+                BitmapFactory.decodeByteArray(jpegBytes, 0, jpegBytes.size, opts)
+            }.getOrNull()
+        }
+
         private fun drawAnalysisEntry(analysis: ReportAnalysis) {
             ensureSpace(56f)
             val canvas = currentCanvas ?: return
-            canvas.drawText(analysis.headline, marginX, currentY + 12f, entryTitlePaint)
+            // Headlines are fixed enum strings today, but cheap to
+            // sanitize anyway — guards against a future change that
+            // starts propagating model output into this field.
+            // Bitmap-backed to match drawWrappedText and avoid the PDF
+            // canvas text-pipeline SIGSEGV on Samsung One UI 4.
+            drawSingleLineViaBitmap(
+                sanitizeForPdf(analysis.headline),
+                marginX,
+                currentY + 12f,
+                entryTitlePaint,
+            )
             drawGuidancePill(canvas, analysis.guidance, topY = currentY)
             currentY += 18f
 
-            canvas.drawText(
+            drawSingleLineViaBitmap(
                 "Completed ${formatInstant(analysis.completedAtEpochMillis)}",
                 marginX,
                 currentY + 10f,
@@ -494,7 +616,34 @@ class HealthReportPdfGenerator(
             // stripped. We can't render bold in a StaticLayout span
             // without more plumbing, and the user can go back to the
             // in-app detail view for the rich version.
-            drawWrappedText(flattenMarkdown(analysis.summaryText), bodyPaint)
+            //
+            // The `summaryText` is the one field in this report pipeline
+            // that can contain arbitrary model output — every other
+            // draw-text input is either an enum or a formatted date. We
+            // previously SIGSEGV'd inside libminikin on an analysis whose
+            // summary contained a malformed surrogate run, so
+            // [sanitizeForPdf] is applied BEFORE markdown flattening,
+            // and the whole draw is wrapped in a last-resort catch that
+            // falls back to a friendlier placeholder rather than
+            // crashing the generator mid-page.
+            // Strip `GUIDANCE:` / `NHS_REFERENCE:` internal markers
+            // before flattening — those are renderer-agnostic classifier
+            // hints; the guidance is already conveyed by the pill above,
+            // and we emit our own authoritative NHS disclaimer below so
+            // the footer line is identical across every analysis in the
+            // report.
+            val cleanedSummary = AnalysisSummaryFormatter.stripInternalMarkers(analysis.summaryText)
+            val safeBody = flattenMarkdown(sanitizeForPdf(cleanedSummary))
+            // Bitmap-backed drawWrappedText is the primary crash fix — see
+            // its kdoc for the libminikin/PDF-canvas bug this avoids.
+            drawWrappedText(safeBody, bodyPaint)
+
+            // Always-present NHS disclaimer. Mirrors the in-app card so a
+            // clinician reading the printed report sees the same "check
+            // NHS for full symptoms, call 111/999" note that the user
+            // saw on screen.
+            drawSpacer(4f)
+            drawWrappedText(AnalysisSummaryFormatter.NHS_DISCLAIMER, mutedBodyPaint)
 
             drawSpacer(8f)
             strokePaint.color = COLOR_RULE_SOFT
@@ -505,7 +654,7 @@ class HealthReportPdfGenerator(
 
         private fun drawLabelledParagraph(label: String, body: String) {
             ensureSpace(16f)
-            currentCanvas?.drawText(label, marginX, currentY + 10f, labelPaint)
+            drawSingleLineViaBitmap(label, marginX, currentY + 10f, labelPaint)
             currentY += 14f
             drawWrappedText(body, bodyPaint)
         }
@@ -593,78 +742,151 @@ class HealthReportPdfGenerator(
 
         /**
          * Core text-drawing primitive — wraps [text] at [printableWidth]
-         * using [StaticLayout] and advances [currentY] accordingly.
-         * Handles page-break mid-paragraph by re-laying-out the
-         * remainder on a fresh page.
+         * and advances [currentY] accordingly.
+         *
+         * ### Why the bitmap detour?
+         * The "obvious" implementation would be to call `layout.draw(pdfCanvas)`
+         * directly, and that's what this method used to do. On some Samsung
+         * devices running Android 12 (S10e / One UI 4) that path trips a
+         * Skia bug inside libminikin / libhwui — a null-dereference SIGSEGV
+         * at address 0x0 when the PDF canvas's text pipeline shapes
+         * multi-line body text. Native signals bypass Kotlin try/catch, so
+         * the process simply dies and the report generation is never
+         * completed.
+         *
+         * Routing through an offscreen [Bitmap] canvas sidesteps the bug:
+         * the `StaticLayout` draws into a normal ARGB_8888 bitmap using
+         * the regular hardware/software Skia path (which works fine), and
+         * then we composite that bitmap onto the PDF canvas with
+         * [Canvas.drawBitmap] — a much simpler native op that does NOT
+         * invoke the buggy text shaping code on the PDF side.
+         *
+         * Memory cost is bounded: printable width × line height, so at
+         * most a few hundred KB per draw; we recycle immediately.
          */
         private fun drawWrappedText(text: String, paint: TextPaint) {
+            if (text.isEmpty()) return
             var remaining = text
+            val width = printableWidth.roundToInt().coerceAtLeast(1)
             while (remaining.isNotEmpty()) {
-                val canvas = currentCanvas ?: return
+                if (currentCanvas == null) return
                 val availableHeight = (pageHeight - marginY) - currentY
                 if (availableHeight < paint.textSize * 1.4f) {
                     closePage()
                     openPage()
                     continue
                 }
-                val layout = StaticLayout.Builder.obtain(
-                    remaining,
-                    0,
-                    remaining.length,
-                    paint,
-                    printableWidth.roundToInt(),
-                )
-                    .setAlignment(Layout.Alignment.ALIGN_NORMAL)
-                    .setLineSpacing(2f, 1f)
-                    .setIncludePad(false)
-                    .build()
 
-                val fullHeight = layout.height.toFloat()
-                if (fullHeight <= availableHeight) {
-                    canvas.save()
-                    canvas.translate(marginX, currentY)
-                    layout.draw(canvas)
-                    canvas.restore()
-                    currentY += fullHeight + 2f
-                    return
+                val layout = buildStaticLayout(remaining, paint, width)
+                val fullHeight = layout.height
+                val (chunkHeight, splitOffset) = if (fullHeight.toFloat() <= availableHeight) {
+                    fullHeight to remaining.length
+                } else {
+                    // Fit as many lines as we can on this page.
+                    var fittingLines = layout.lineCount
+                    while (fittingLines > 0 &&
+                        layout.getLineBottom(fittingLines - 1) > availableHeight
+                    ) {
+                        fittingLines -= 1
+                    }
+                    if (fittingLines == 0) {
+                        closePage(); openPage(); continue
+                    }
+                    layout.getLineBottom(fittingLines - 1) to layout.getLineEnd(fittingLines - 1)
                 }
 
-                // Fit as many lines as we can, then continue the
-                // remainder on the next page.
-                var fittingLines = layout.lineCount
-                while (fittingLines > 0 &&
-                    layout.getLineBottom(fittingLines - 1) > availableHeight
-                ) {
-                    fittingLines -= 1
+                val chunkText = remaining.substring(0, splitOffset)
+                val chunkLayout = if (splitOffset == remaining.length) {
+                    layout
+                } else {
+                    buildStaticLayout(chunkText, paint, width)
                 }
-                if (fittingLines == 0) {
-                    closePage()
-                    openPage()
-                    continue
-                }
-                val splitOffset = layout.getLineEnd(fittingLines - 1)
-                val chunk = remaining.substring(0, splitOffset)
-                val chunkLayout = StaticLayout.Builder.obtain(
-                    chunk,
-                    0,
-                    chunk.length,
-                    paint,
-                    printableWidth.roundToInt(),
-                )
-                    .setAlignment(Layout.Alignment.ALIGN_NORMAL)
-                    .setLineSpacing(2f, 1f)
-                    .setIncludePad(false)
-                    .build()
-                canvas.save()
-                canvas.translate(marginX, currentY)
-                chunkLayout.draw(canvas)
-                canvas.restore()
-                currentY += chunkLayout.height.toFloat() + 2f
+                val realHeight = chunkLayout.height.coerceIn(1, chunkHeight.coerceAtLeast(1))
+                val drawHeight = chunkLayout.height.coerceAtLeast(1)
+                renderLayoutViaBitmap(chunkLayout, width, drawHeight)
+                currentY += drawHeight + 2f
                 remaining = remaining.substring(splitOffset)
                 if (remaining.isNotEmpty()) {
-                    closePage()
-                    openPage()
+                    closePage(); openPage()
                 }
+                // `realHeight` kept to silence an unused-var warning in
+                // some compiler combos — no behavioural impact.
+                @Suppress("UNUSED_VARIABLE") val _touch = realHeight
+            }
+        }
+
+        private fun buildStaticLayout(
+            text: String,
+            paint: TextPaint,
+            width: Int,
+        ): StaticLayout = StaticLayout.Builder.obtain(
+            text, 0, text.length, paint, width,
+        )
+            .setAlignment(Layout.Alignment.ALIGN_NORMAL)
+            .setLineSpacing(2f, 1f)
+            .setIncludePad(false)
+            // Disable the native hyphenator + advanced line-break pass.
+            // On some Android 12+ builds those paths contain a
+            // null-dereference crash (SIGSEGV reports w/ addr 0x0 inside
+            // libhwui/libminikin). Simple break strategy is crash-safe
+            // and visually indistinguishable for left-aligned body text.
+            .setBreakStrategy(android.graphics.text.LineBreaker.BREAK_STRATEGY_SIMPLE)
+            .setHyphenationFrequency(Layout.HYPHENATION_FREQUENCY_NONE)
+            .build()
+
+        /**
+         * Render [layout] into an offscreen ARGB_8888 bitmap and drawBitmap
+         * it onto the current PDF canvas at [marginX], [currentY]. See
+         * [drawWrappedText] kdoc for why we indirect through a bitmap.
+         */
+        private fun renderLayoutViaBitmap(
+            layout: StaticLayout,
+            width: Int,
+            height: Int,
+        ) {
+            val canvas = currentCanvas ?: return
+            val bitmap = Bitmap.createBitmap(width, height, Bitmap.Config.ARGB_8888)
+            try {
+                val offscreen = Canvas(bitmap)
+                layout.draw(offscreen)
+                canvas.drawBitmap(bitmap, marginX, currentY, null)
+            } finally {
+                bitmap.recycle()
+            }
+        }
+
+        /**
+         * Single-line bitmap-backed draw, used in place of a bare
+         * `canvas.drawText(...)` for any string containing model output
+         * or user-supplied content. Same rationale as [drawWrappedText]:
+         * the PDF canvas's text pipeline is the crashing surface, so we
+         * redirect through a bitmap.
+         *
+         * Caller provides the absolute baseline y ([baselineY]) — matches
+         * the `canvas.drawText(text, x, y, paint)` signature it replaces.
+         */
+        private fun drawSingleLineViaBitmap(
+            text: String,
+            x: Float,
+            baselineY: Float,
+            paint: TextPaint,
+        ) {
+            if (text.isEmpty()) return
+            val canvas = currentCanvas ?: return
+            val measuredWidth = paint.measureText(text).coerceAtLeast(1f).toInt() + 2
+            // Use font metrics to size the bitmap so the glyph bounding
+            // box (including descenders) fits.
+            val fm = paint.fontMetrics
+            val ascent = -fm.ascent
+            val descent = fm.descent
+            val bmpHeight = (ascent + descent).toInt().coerceAtLeast(1)
+            val bitmap = Bitmap.createBitmap(measuredWidth, bmpHeight, Bitmap.Config.ARGB_8888)
+            try {
+                val offscreen = Canvas(bitmap)
+                offscreen.drawText(text, 0f, ascent, paint)
+                canvas.drawBitmap(bitmap, x, baselineY - ascent, null)
+            } finally {
+                bitmap.recycle()
             }
         }
     }
@@ -679,6 +901,85 @@ class HealthReportPdfGenerator(
             s <= 6 -> Color.parseColor("#FFE8BF")
             else -> Color.parseColor("#FADAD1")
         }
+    }
+
+    /**
+     * Defensive text sanitizer for anything that reaches Paint / Skia.
+     *
+     * There's a well-known class of SIGSEGV crashes on Android's text
+     * layout pipeline (libminikin / libhwui) triggered by:
+     *
+     *   - Unpaired UTF-16 surrogate halves (invalid unicode),
+     *   - C0/C1 control characters other than `\n` and `\t`,
+     *   - Zero-width / bidi control codepoints in long runs,
+     *   - Absurdly long unbreakable word runs that overflow the
+     *     native line-breaker's internal buffers.
+     *
+     * User-supplied fields (symptom description, notes) and raw AI
+     * output can all contain any of those. We scrub here — cheap, local,
+     * no dependency on the font fallback chain — rather than trying to
+     * guess which specific char pattern will crash a given device.
+     *
+     * Sanitisation is intentionally destructive: we're rendering a PDF,
+     * not preserving the user's exact keystrokes. The in-app UI shows
+     * the raw text; this only runs on the way into Skia.
+     */
+    private fun sanitizeForPdf(source: String): String {
+        if (source.isEmpty()) return source
+        val sb = StringBuilder(source.length)
+        var i = 0
+        var runLength = 0
+        while (i < source.length) {
+            val ch = source[i]
+            val code = ch.code
+            val keep: Char? = when {
+                // Tab / newline survive.
+                ch == '\n' || ch == '\t' -> ch
+                // C0 / DEL control range — replace with space.
+                code < 0x20 || code == 0x7F -> ' '
+                // C1 control range — replace with space.
+                code in 0x80..0x9F -> ' '
+                // Bidi + zero-width + formatting controls that minikin
+                // reportedly trips on in long runs.
+                code == 0x200B || code == 0x200C || code == 0x200D ||
+                    code == 0xFEFF || code in 0x202A..0x202E ||
+                    code in 0x2066..0x2069 -> ' '
+                // Unpaired high surrogate — must be followed by a low
+                // surrogate. Peek ahead; drop if not paired.
+                ch.isHighSurrogate() -> {
+                    val next = if (i + 1 < source.length) source[i + 1] else null
+                    if (next != null && next.isLowSurrogate()) {
+                        sb.append(ch)
+                        sb.append(next)
+                        i += 2
+                        runLength += 1
+                        continue
+                    } else {
+                        ' '
+                    }
+                }
+                // Unpaired low surrogate — drop.
+                ch.isLowSurrogate() -> ' '
+                else -> ch
+            }
+            if (keep != null) {
+                if (keep == '\n' || keep == ' ' || keep == '\t') {
+                    runLength = 0
+                } else {
+                    runLength += 1
+                }
+                // Break pathologically long unbreakable runs by
+                // inserting a soft space. 80 chars is well above any
+                // natural word length but well under what would wrap.
+                if (runLength > MAX_UNBREAKABLE_RUN) {
+                    sb.append(' ')
+                    runLength = 0
+                }
+                sb.append(keep)
+            }
+            i += 1
+        }
+        return sb.toString()
     }
 
     private fun flattenMarkdown(source: String): String {
@@ -719,6 +1020,31 @@ class HealthReportPdfGenerator(
         const val REPORTS_SUBDIR = "reports"
         const val PREVIEW_SUBDIR = "preview"
         const val COMPRESSED_SUFFIX = ".gz"
+
+        /**
+         * Soft-break threshold for unbreakable character runs — 80 is
+         * well above any natural word (the longest English word in
+         * common use is 29 chars) but short enough that a pathological
+         * 10k-char URL or base64 blob can't overflow the native line
+         * breaker's fixed-size stack buffers.
+         */
+        private const val MAX_UNBREAKABLE_RUN = 80
+
+        /**
+         * Height (in PDF points, 72dpi) of each photo thumbnail in a
+         * log-entry row. 120pt ≈ 42mm — large enough to read a close-up
+         * of a rash or skin mark without blowing up the PDF footprint.
+         * At 3 photos wide on an A4 margin (~500pt printable), each tile
+         * is ~160pt wide — landscape, which matches the centre-crop
+         * bias in the draw routine.
+         */
+        private const val PHOTO_HEIGHT_PT: Float = 120f
+
+        /**
+         * Height of the "Photos" caption line above the thumbnail row.
+         * Matches the "Notes" / "Medication" label spacing.
+         */
+        private const val PHOTO_CAPTION_HEIGHT_PT: Float = 14f
 
         private val DATE_FMT: DateTimeFormatter =
             DateTimeFormatter.ofPattern("d MMM yyyy · HH:mm", Locale.getDefault())

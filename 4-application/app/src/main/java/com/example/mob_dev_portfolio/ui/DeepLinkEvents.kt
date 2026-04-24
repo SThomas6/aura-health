@@ -58,4 +58,13 @@ sealed interface DeepLinkTarget {
      * the Room rowId assigned when the worker inserted the row.
      */
     data class AnalysisRun(val runId: Long) : DeepLinkTarget
+
+    /**
+     * Open the Health Connect settings screen — used when the system
+     * routes the `androidx.health.ACTION_SHOW_PERMISSIONS_RATIONALE`
+     * intent to MainActivity. Health Connect requires apps requesting
+     * health permissions to surface a "why we use this" screen, and the
+     * settings screen is the natural landing spot.
+     */
+    data object HealthDataSettings : DeepLinkTarget
 }

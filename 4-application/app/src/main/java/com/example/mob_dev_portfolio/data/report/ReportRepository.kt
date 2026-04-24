@@ -6,6 +6,7 @@ import com.example.mob_dev_portfolio.data.ai.AnalysisGuidance
 import com.example.mob_dev_portfolio.data.ai.AnalysisRun
 import com.example.mob_dev_portfolio.data.ai.AnalysisRunDao
 import com.example.mob_dev_portfolio.data.ai.AnalysisRunEntity
+import com.example.mob_dev_portfolio.data.photo.SymptomPhotoRepository
 
 /**
  * Assembles the data for a health-report PDF.
@@ -23,10 +24,23 @@ import com.example.mob_dev_portfolio.data.ai.AnalysisRunEntity
  *    DAO; both are read-only snapshots so there's no transactional
  *    coupling between them. The generator is free to interleave or
  *    separate them as the layout dictates.
+ *
+ * ### Photos (FR-PA-06)
+ * Each [ReportLog] carries any photo attachments as decrypted JPEG
+ * bytes so the PDF generator can decode + scale them on the fly.
+ * We deliberately hand over the plaintext bytes rather than [java.io.File]
+ * references: the generator runs on the UI process and has no key
+ * access of its own, so pre-decrypting here keeps the crypto surface
+ * narrow and doesn't leave plaintext scratch files on disk.
  */
 open class ReportRepository(
     private val symptomLogDao: SymptomLogDao,
     private val analysisRunDao: AnalysisRunDao,
+    /**
+     * Optional so tests that don't care about photos can pass null. In
+     * production the AppContainer always supplies the real one.
+     */
+    private val photoRepository: SymptomPhotoRepository? = null,
 ) {
 
     /**
@@ -40,7 +54,17 @@ open class ReportRepository(
     open suspend fun loadReportSnapshot(
         generatedAtEpochMillis: Long = System.currentTimeMillis(),
     ): ReportSnapshot {
-        val logs = symptomLogDao.listChronologicalAsc().map { it.toReportLog() }
+        val rawLogs = symptomLogDao.listChronologicalAsc()
+        val logs = rawLogs.map { entity ->
+            val photos = photoRepository?.let { repo ->
+                // Pull the row list first, then decrypt each into bytes.
+                // Corrupt / missing files drop silently — the PDF still
+                // renders without a phantom placeholder.
+                repo.listForLog(entity.id)
+                    .mapNotNull { repo.readBytes(it) }
+            }.orEmpty()
+            entity.toReportLog(photos)
+        }
         val analyses = analysisRunDao.listChronologicalAsc().map { it.toReportAnalysis() }
         val total = symptomLogDao.totalCount()
         val average = symptomLogDao.averageSeverity()
@@ -91,6 +115,12 @@ data class ReportLog(
     val locationName: String?,
     val weatherDescription: String?,
     val temperatureCelsius: Double?,
+    /**
+     * Decrypted JPEG bytes for each attached photo, in capture order.
+     * Empty when the log has no attachments — the PDF generator skips
+     * the photo row entirely in that case.
+     */
+    val photoJpegBytes: List<ByteArray> = emptyList(),
 )
 
 /** Compact row for the AI insights section. */
@@ -102,7 +132,7 @@ data class ReportAnalysis(
     val summaryText: String,
 )
 
-private fun SymptomLogEntity.toReportLog(): ReportLog = ReportLog(
+private fun SymptomLogEntity.toReportLog(photos: List<ByteArray> = emptyList()): ReportLog = ReportLog(
     id = id,
     symptomName = symptomName,
     description = description,
@@ -115,6 +145,7 @@ private fun SymptomLogEntity.toReportLog(): ReportLog = ReportLog(
     locationName = locationName,
     weatherDescription = weatherDescription,
     temperatureCelsius = temperatureCelsius,
+    photoJpegBytes = photos,
 )
 
 private fun AnalysisRunEntity.toReportAnalysis(): ReportAnalysis = ReportAnalysis(

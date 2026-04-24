@@ -1,12 +1,15 @@
 package com.example.mob_dev_portfolio.work
 
 import androidx.work.Constraints
+import androidx.work.ExistingPeriodicWorkPolicy
 import androidx.work.ExistingWorkPolicy
 import androidx.work.NetworkType
 import androidx.work.OneTimeWorkRequestBuilder
+import androidx.work.PeriodicWorkRequestBuilder
 import androidx.work.WorkInfo
 import androidx.work.WorkManager
 import androidx.work.workDataOf
+import java.util.concurrent.TimeUnit
 import kotlinx.coroutines.flow.Flow
 
 /**
@@ -26,6 +29,23 @@ interface AnalysisScheduler {
     fun enqueue(userContext: String)
     fun currentWorkInfos(): Flow<List<WorkInfo>>
     fun cancel()
+
+    /**
+     * Ensure a weekly background analysis is scheduled.
+     *
+     * Idempotent: call this from [AuraApplication.onCreate] on every cold
+     * start. [ExistingPeriodicWorkPolicy.KEEP] means the first call wins —
+     * we never restart the countdown, so the weekly cadence drifts at most
+     * one period even if the user force-stops and relaunches the app.
+     *
+     * The worker receives `KEY_SCHEDULED = true` so it knows to suppress
+     * the "you look in the clear" notification — the user only wants a
+     * ping when something actually needs attention.
+     */
+    fun scheduleWeekly()
+
+    /** Cancel the recurring weekly run (e.g. if the user opts out). */
+    fun cancelWeekly()
 }
 
 class WorkManagerAnalysisScheduler(
@@ -60,5 +80,32 @@ class WorkManagerAnalysisScheduler(
 
     override fun cancel() {
         workManager.cancelUniqueWork(AnalysisWorker.UNIQUE_WORK_NAME)
+    }
+
+    override fun scheduleWeekly() {
+        val request = PeriodicWorkRequestBuilder<AnalysisWorker>(7, TimeUnit.DAYS)
+            .setInputData(workDataOf(AnalysisWorker.KEY_SCHEDULED to true))
+            .setConstraints(
+                Constraints.Builder()
+                    .setRequiredNetworkType(NetworkType.CONNECTED)
+                    .build(),
+            )
+            // Gentle initial delay so a cold start that schedules us doesn't
+            // also immediately fire a run while the user is still mid-launch.
+            .setInitialDelay(1, TimeUnit.HOURS)
+            .build()
+        workManager.enqueueUniquePeriodicWork(
+            AnalysisWorker.UNIQUE_WEEKLY_NAME,
+            // KEEP: once the weekly cadence is established, we don't want
+            // every cold start to reset the timer. Only a ConfigurationChange
+            // (new period / new constraints) would warrant UPDATE, which we
+            // don't currently need.
+            ExistingPeriodicWorkPolicy.KEEP,
+            request,
+        )
+    }
+
+    override fun cancelWeekly() {
+        workManager.cancelUniqueWork(AnalysisWorker.UNIQUE_WEEKLY_NAME)
     }
 }

@@ -84,7 +84,29 @@ dependencies {
     androidTestImplementation composeBom
 
     implementation 'androidx.core:core-ktx:1.16.0'
+    // Android 12+ splash screen API — with minSdk 31 we could technically
+    // rely on the platform version, but the AndroidX wrapper back-ports
+    // `installSplashScreen()` ergonomics and the theme attributes stay
+    // forward-compatible if minSdk ever drops.
+    implementation 'androidx.core:core-splashscreen:1.0.1'
     implementation 'androidx.activity:activity-compose:1.10.1'
+    // Fragment dependency is implicit via androidx.biometric below, but
+    // we take an explicit pin so MainActivity's FragmentActivity base
+    // class resolves to the same version as the biometric library's
+    // internal Fragment hosting.
+    implementation 'androidx.fragment:fragment-ktx:1.8.5'
+    // AppCompat pulled in for AppCompatDelegate.setDefaultNightMode — we
+    // don't use AppCompatActivity (MainActivity extends FragmentActivity)
+    // but the delegate's static night-mode setter is the only reliable
+    // way to flip the system-level uiMode *before* the splash screen
+    // resource qualifier is picked on the next cold launch. Without this
+    // the launcher splash always follows the device-wide dark setting,
+    // which ignores the user's in-app light/dark override.
+    implementation 'androidx.appcompat:appcompat:1.7.0'
+    // Biometric auth (class-3 / strong biometrics with device-credential
+    // fallback). Gates app entry when the user opts in from Settings so
+    // health data stays behind a lock if the device is shared or lost.
+    implementation 'androidx.biometric:biometric:1.1.0'
     implementation 'androidx.lifecycle:lifecycle-runtime-ktx:2.9.1'
     implementation 'androidx.lifecycle:lifecycle-viewmodel-compose:2.9.1'
     implementation 'androidx.lifecycle:lifecycle-runtime-compose:2.9.1'
@@ -114,6 +136,12 @@ dependencies {
 
     implementation 'androidx.datastore:datastore-preferences:1.1.1'
 
+    // EXIF metadata reader/writer. Used when a photo is attached to a symptom
+    // log: we read orientation so portraits don't save sideways, and the
+    // re-encode pipeline (decode → matrix rotate → JPEG) strips every other
+    // tag — including GPS (NFR-PA-03) — without a key-by-key blacklist.
+    implementation 'androidx.exifinterface:exifinterface:1.3.7'
+
     implementation 'com.google.android.gms:play-services-location:21.3.0'
 
     implementation 'com.squareup.okhttp3:okhttp:4.12.0'
@@ -122,6 +150,12 @@ dependencies {
     // under memory pressure, which is the NFR the background-ai-processing
     // story asks for.
     implementation 'androidx.work:work-runtime-ktx:2.9.1'
+
+    // Health Connect client — read-only integration with the system
+    // Health Connect data store. 1.1.0-alpha11 is the latest widely-mirrored
+    // release compatible with compileSdk 35; on devices below API 34 the
+    // SDK transparently routes through the Play Store Health Connect app.
+    implementation 'androidx.health.connect:connect-client:1.1.0-alpha11'
 
     testImplementation 'junit:junit:4.13.2'
     testImplementation 'androidx.work:work-testing:2.9.1'

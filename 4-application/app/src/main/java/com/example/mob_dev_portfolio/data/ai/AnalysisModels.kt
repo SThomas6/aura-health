@@ -8,11 +8,27 @@ package com.example.mob_dev_portfolio.data.ai
  * no exact DOB anywhere in the tree. Anything downstream (the serialization
  * layer, the OkHttp client, the test doubles) can assume the data is safe
  * to transmit.
+ *
+ * [biologicalSex] and [healthSummary] were added for the Health Connect
+ * integration story. They are already-bucketed / already-aggregated values,
+ * so they also uphold the "no raw PII" invariant — the model sees "Steps
+ * (7d): 54,210" rather than per-minute step readings with timestamps.
  */
 data class AnalysisRequest(
     val ageRange: String,
+    val biologicalSex: String?,
     val userContext: String,
+    val healthSummary: HealthSummary?,
     val logs: List<SanitizedLog>,
+    /**
+     * Conditions a clinician has already told the user about. The prompt
+     * surfaces these as known context so the model treats linked symptoms
+     * as "part of an already-diagnosed pattern" rather than a fresh
+     * signal. Logs the user has marked as "reviewed & cleared" are not
+     * present in this object at all — they've been dropped upstream in
+     * [AnalysisService.buildRequest].
+     */
+    val knownDiagnoses: List<KnownDiagnosis> = emptyList(),
 ) {
     data class SanitizedLog(
         val symptomName: String,
@@ -27,6 +43,56 @@ data class AnalysisRequest(
         val pressureHpa: Double?,
         val airQualityIndex: Int?,
         val locationName: String?,
+        /**
+         * The 24h-preceding aggregate for this symptom, or null if the
+         * user hasn't connected Health Connect / hasn't granted the
+         * relevant read permissions / the window was empty. Held as a
+         * map of short labels → pre-formatted values so the prompt
+         * builder doesn't have to branch on missing fields.
+         */
+        val healthAggregate24h: Map<String, String>?,
+        /**
+         * If the user has linked this symptom to a clinician-flagged
+         * diagnosis, the diagnosis label (e.g. "Chronic migraine") is
+         * echoed here. The prompt builder appends it as
+         * `[known: migraine]` so the model treats the symptom as
+         * already-explained instead of a fresh pattern-detection
+         * target. Null for unlinked logs.
+         */
+        val diagnosisLabel: String? = null,
+    )
+
+    /**
+     * A single diagnosis the user has pinned from a doctor visit, plus
+     * the brief history that grounds it. Kept intentionally sparse:
+     * only symptom name + date for each related log, never description
+     * or notes — the user's wording ("brief history") was explicit.
+     */
+    data class KnownDiagnosis(
+        val label: String,
+        val history: List<HistoryEntry>,
+    ) {
+        data class HistoryEntry(
+            val symptomName: String,
+            val startIsoDate: String,
+        )
+    }
+
+    /**
+     * The 7-day health aggregate + body measurements that frame the
+     * per-log context. Flattened into two simple maps for the same
+     * "no branching in the prompt" reason as [SanitizedLog.healthAggregate24h].
+     *
+     * [includedMetrics] surfaces the short labels of the metrics that
+     * actually contributed data to this snapshot so the analysis
+     * detail screen can render a "considered: Steps, Sleep, …" chip
+     * row when the run is opened later.
+     */
+    data class HealthSummary(
+        val includedMetrics: List<String>,
+        val rolling7Day: Map<String, String>,
+        val bodyMeasurements: Map<String, String>,
+        val derivedBmi: Double?,
     )
 }
 

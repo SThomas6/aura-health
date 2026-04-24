@@ -41,6 +41,12 @@ class FusedLocationProvider(
         val request = CurrentLocationRequest.Builder()
             .setPriority(Priority.PRIORITY_BALANCED_POWER_ACCURACY)
             .setMaxUpdateAgeMillis(0L) // Reject cached fixes — we want a fresh read at save time.
+            // Hard ceiling on how long Play Services will wait for a fix
+            // before giving up. Without this, indoor GPS on some devices
+            // (notably Samsung) blocks for ~30s while the fused provider
+            // falls back through every sensor. 5s matches the env-fetch
+            // SLA so the whole save pipeline never exceeds ~10s.
+            .setDurationMillis(CURRENT_LOCATION_TIMEOUT_MILLIS)
             .build()
 
         return try {
@@ -79,4 +85,8 @@ class FusedLocationProvider(
             context,
             Manifest.permission.ACCESS_COARSE_LOCATION,
         ) == PackageManager.PERMISSION_GRANTED
+
+    companion object {
+        private const val CURRENT_LOCATION_TIMEOUT_MILLIS: Long = 5_000L
+    }
 }

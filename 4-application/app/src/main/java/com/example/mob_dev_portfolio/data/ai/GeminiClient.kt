@@ -150,27 +150,102 @@ class HttpGeminiClient(
      * than a wall of prose with raw asterisks in it.
      */
     private fun buildPrompt(request: AnalysisRequest): String = buildString {
-        appendLine("You are an assistant helping a user spot possible correlations between their symptoms and environmental factors.")
-        appendLine("You never receive the user's name or exact date of birth; only an age range is provided.")
-        appendLine("Do not invent PII. Avoid medical diagnoses.")
+        appendLine("You are an assistant helping a user spot possible correlations between their symptoms, environmental factors, and recent health metrics, AND screen those patterns for red flags consistent with serious or life-threatening conditions.")
+        appendLine("You never receive the user's name or exact date of birth; only an age range and (optionally) a coarse biological-sex bucket are provided.")
+        appendLine("Health metric values below are already aggregated (7-day totals/averages, 24h-preceding windows) — never echo raw per-minute readings.")
+        appendLine("Do not invent PII. You are not giving a diagnosis — you are surfacing *possibilities* the user should rule out with a clinician.")
+        appendLine()
+        appendLine("CLINICAL SCREENING — what to look for:")
+        appendLine("- Patterns consistent with LIFE-THREATENING or SERIOUS conditions, including but not limited to:")
+        appendLine("  cancers (unexplained weight loss, persistent fatigue, new lumps, blood in stool/urine, persistent cough, changing moles, post-menopausal bleeding),")
+        appendLine("  cardiovascular events (chest pain, radiating arm/jaw pain, sudden breathlessness, syncope, palpitations with dizziness),")
+        appendLine("  stroke / TIA (sudden weakness, facial droop, speech difficulty, sudden severe headache),")
+        appendLine("  sepsis / serious infection (high fever with rigors, confusion, rapid breathing, mottled skin),")
+        appendLine("  pulmonary embolism / DVT (unilateral calf swelling, sudden pleuritic chest pain, breathlessness),")
+        appendLine("  diabetic emergencies, severe mental-health crises, meningitis, severe allergic reactions,")
+        appendLine("  neurological red flags (new-onset severe headache, vision loss, seizure).")
+        appendLine("- If any recent log or combination of logs/vitals looks consistent with one of these, name it explicitly as a POSSIBILITY to rule out — phrase tentatively (`*could be consistent with*`, `*worth ruling out*`).")
+        appendLine("- If nothing looks concerning, say so plainly — do not invent conditions.")
         appendLine()
         appendLine("OUTPUT FORMAT — follow strictly:")
         appendLine("- Respond in GitHub-flavoured markdown.")
         appendLine("- START with one line of exactly this shape: `GUIDANCE: clear` OR `GUIDANCE: seek medical advice`.")
-        appendLine("  Use `seek medical advice` if the recent logs show severe or worsening symptoms that a clinician should review; otherwise use `clear`.")
-        appendLine("- Then use `## ` for up to three short section headings (e.g. `## Patterns`, `## Possible triggers`, `## Suggestions`).")
-        appendLine("- Under each heading give 2-4 concise bullet points starting with `- `.")
+        appendLine("  Use `seek medical advice` if the recent logs show severe or worsening symptoms, or any pattern consistent with the red flags above; otherwise use `clear`.")
+        appendLine("- Then use `## ` section headings in this order (omit a section only if it genuinely has nothing to say):")
+        appendLine("  `## Patterns` — 2-4 bullets on what the data shows.")
+        appendLine("  `## Possible conditions` — 1-4 bullets naming conditions that *could* explain the pattern. Always tentative. If truly nothing fits, write a single bullet: `- No specific conditions stood out from these logs.`")
+        appendLine("  `## Suggestions` — 2-4 bullets of practical next steps (tracking, lifestyle, when to see a GP / call 111 / call 999).")
+        appendLine("- End with one line of exactly this shape: `NHS_REFERENCE: Check https://www.nhs.uk for full symptom information on any condition mentioned above.`")
+        appendLine("- Under each heading give concise bullet points starting with `- `.")
         appendLine("- Bold key terms with `**term**` and italicise tentative language with `*might*` / `*could*`.")
-        appendLine("- Keep the whole response under 180 words.")
+        appendLine("- Keep the whole response under 220 words.")
         appendLine("- Do NOT wrap anything in code fences or triple backticks.")
-        appendLine("- Do NOT include tables or links.")
+        appendLine("- Do NOT include tables.")
+        appendLine("- The only link allowed is the `https://www.nhs.uk` reference in the NHS_REFERENCE line.")
         appendLine("- Do NOT preface with phrases like \"Sure, here is...\" — jump straight to the GUIDANCE line.")
         appendLine()
         appendLine("User age range: ${request.ageRange}")
+        request.biologicalSex?.let { appendLine("Biological sex: $it") }
         appendLine()
         if (request.userContext.isNotBlank()) {
             appendLine("Additional context from the user:")
             appendLine(request.userContext.trim())
+            appendLine()
+        }
+        // Known-diagnoses block. These are conditions the user has
+        // already discussed with a clinician. We surface them so the
+        // model treats linked symptoms as already-explained and frames
+        // its observations around them rather than re-discovering them.
+        // Symptoms the user has ticked as "reviewed & cleared" never
+        // appear here OR in the log list below — they've been filtered
+        // upstream in AnalysisService.
+        if (request.knownDiagnoses.isNotEmpty()) {
+            appendLine("Known diagnoses (already discussed with a clinician — treat as context, not as fresh findings):")
+            request.knownDiagnoses.forEach { diagnosis ->
+                append("- ")
+                append(diagnosis.label)
+                if (diagnosis.history.isEmpty()) {
+                    appendLine()
+                } else {
+                    append(" — related logs: ")
+                    appendLine(
+                        diagnosis.history.joinToString(", ") { entry ->
+                            "${entry.symptomName} (${entry.startIsoDate})"
+                        },
+                    )
+                }
+            }
+            appendLine("When a recent symptom below is tagged `[known: <label>]` it belongs to one of these diagnoses. Mention it only if there's a notable change (severity spike, new trigger) — otherwise don't re-flag it as a fresh pattern.")
+            appendLine()
+        }
+        // Explicit signal when the user hasn't shared any Health Connect
+        // data, so the model knows not to invent steps/sleep/vitals-based
+        // observations. The healthSummary block below replaces this line
+        // when present.
+        if (request.healthSummary == null) {
+            appendLine("Connected health data considered: NONE — the user has not shared any Health Connect readings. Do NOT reference any specific health metric (heart rate, sleep, steps, SpO₂, blood pressure, etc.); you have no data on those.")
+            appendLine()
+        }
+        request.healthSummary?.let { summary ->
+            // Be explicit that the list below is the ONLY health data the
+            // model has access to. Without this guardrail the model will
+            // sometimes pattern-complete on "your sleep pattern suggests
+            // …" even when Sleep was disabled — the user reads that and
+            // reasonably concludes we leaked their disabled metrics.
+            appendLine("Connected health data considered: ${summary.includedMetrics.joinToString(", ")}")
+            appendLine("IMPORTANT: treat the above list as exhaustive. Do NOT reference, infer, or mention any other health metric (e.g. heart rate, sleep, SpO₂, blood pressure) that is not in that list. If a metric isn't listed, you have no data on it.")
+            if (summary.rolling7Day.isNotEmpty()) {
+                appendLine("Rolling 7-day aggregates:")
+                summary.rolling7Day.forEach { (label, value) ->
+                    appendLine("- $label: $value")
+                }
+            }
+            if (summary.bodyMeasurements.isNotEmpty()) {
+                appendLine("Latest body measurements:")
+                summary.bodyMeasurements.forEach { (label, value) ->
+                    appendLine("- $label: $value")
+                }
+            }
             appendLine()
         }
         appendLine("Recent symptom logs (most recent first):")
@@ -191,6 +266,17 @@ class HttpGeminiClient(
                 log.airQualityIndex?.let { append(" | AQI: $it") }
                 if (log.contextTags.isNotEmpty()) {
                     append(" | tags: ${log.contextTags.joinToString(",")}")
+                }
+                log.healthAggregate24h?.let { agg ->
+                    if (agg.isNotEmpty()) {
+                        append(" | 24h vitals: ")
+                        append(agg.entries.joinToString(", ") { (k, v) -> "$k=$v" })
+                    }
+                }
+                log.diagnosisLabel?.let { label ->
+                    append(" | [known: ")
+                    append(label)
+                    append("]")
                 }
                 if (log.notes.isNotBlank()) {
                     append(" | notes: ${log.notes.replace('\n', ' ')}")

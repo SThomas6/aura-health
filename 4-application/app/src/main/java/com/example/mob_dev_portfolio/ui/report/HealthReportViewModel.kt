@@ -1,5 +1,6 @@
 package com.example.mob_dev_portfolio.ui.report
 
+import android.util.Log
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.ViewModelProvider
 import androidx.lifecycle.viewModelScope
@@ -104,9 +105,15 @@ class HealthReportViewModel(
                     snapshot = snapshot,
                 )
             }.onSuccess { _state.value = it }
-                .onFailure {
+                .onFailure { error ->
+                    // Log the full stack so a native crash or unexpected
+                    // SQL failure is actually reachable from logcat — the
+                    // error-surface UI only shows `message`, which for a
+                    // RuntimeException wrapping a native crash tends to
+                    // be generic ("Fatal signal 11…").
+                    Log.e(TAG, "Report generation failed", error)
                     _state.value = HealthReportState.Error(
-                        message = it.message
+                        message = error.message
                             ?: "Something went wrong generating your report.",
                     )
                 }
@@ -130,6 +137,8 @@ class HealthReportViewModel(
     }
 
     companion object {
+        private const val TAG = "HealthReportVM"
+
         val Factory: ViewModelProvider.Factory = object : ViewModelProvider.Factory {
             @Suppress("UNCHECKED_CAST")
             override fun <T : ViewModel> create(modelClass: Class<T>, extras: CreationExtras): T {

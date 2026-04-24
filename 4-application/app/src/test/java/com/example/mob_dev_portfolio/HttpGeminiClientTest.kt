@@ -105,7 +105,9 @@ class HttpGeminiClientTest {
         // never re-introduce anything that wasn't in these fields.
         val sanitized = AnalysisRequest(
             ageRange = "25-34",
+            biologicalSex = null,
             userContext = "feels rough today",
+            healthSummary = null,
             logs = listOf(
                 AnalysisRequest.SanitizedLog(
                     symptomName = "Migraine",
@@ -120,6 +122,7 @@ class HttpGeminiClientTest {
                     pressureHpa = 1005.0,
                     airQualityIndex = 28,
                     locationName = "Cardiff, UK",
+                    healthAggregate24h = null,
                 ),
             ),
         )
@@ -194,7 +197,9 @@ class HttpGeminiClientTest {
 
     private fun minimalRequest(): AnalysisRequest = AnalysisRequest(
         ageRange = "25-34",
+        biologicalSex = null,
         userContext = "",
+        healthSummary = null,
         logs = emptyList(),
     )
 }

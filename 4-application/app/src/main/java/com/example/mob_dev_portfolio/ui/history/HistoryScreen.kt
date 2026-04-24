@@ -25,18 +25,17 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.EventNote
 import androidx.compose.material.icons.automirrored.filled.KeyboardArrowRight
+import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.Clear
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.FilterList
 import androidx.compose.material.icons.filled.Search
-import androidx.compose.material3.AssistChip
 import androidx.compose.material3.Badge
 import androidx.compose.material3.BadgedBox
-import androidx.compose.material3.Card
-import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.DatePicker
 import androidx.compose.material3.DatePickerDialog
 import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material3.ExtendedFloatingActionButton
 import androidx.compose.material3.FilterChip
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
@@ -83,6 +82,7 @@ private val DateOnlyFormat: DateTimeFormatter =
 @Composable
 fun HistoryScreen(
     onOpenLog: (Long) -> Unit,
+    onAddSymptom: () -> Unit,
     viewModel: HistoryViewModel = viewModel(factory = HistoryViewModel.Factory),
 ) {
     val logs by viewModel.logs.collectAsStateWithLifecycle()
@@ -92,7 +92,12 @@ fun HistoryScreen(
     Scaffold(
         topBar = {
             TopAppBar(
-                title = { Text("History") },
+                // Renamed from "History" to "Symptoms" when the Log tab
+                // was folded into this screen via the FAB — the user's
+                // mental model is a single place for "my symptoms",
+                // with "add one" and "browse past ones" both reachable
+                // from here.
+                title = { Text("Symptoms") },
                 actions = {
                     BadgedBox(
                         badge = {
@@ -112,6 +117,20 @@ fun HistoryScreen(
                         }
                     }
                 },
+            )
+        },
+        floatingActionButton = {
+            // Extended FAB (rather than a plain circular one) so the
+            // "Log" affordance stays discoverable to new users who
+            // might otherwise read the bottom bar and assume the
+            // tab's only purpose is browsing past entries. Collapses
+            // to an icon-only FAB in contexts that demand it via
+            // Material's expanded/collapsed handling.
+            ExtendedFloatingActionButton(
+                onClick = onAddSymptom,
+                icon = { Icon(Icons.Filled.Add, contentDescription = null) },
+                text = { Text("Log") },
+                modifier = Modifier.testTag("btn_symptoms_add"),
             )
         },
     ) { padding ->

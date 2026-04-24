@@ -399,8 +399,21 @@ private fun AnalysisResultArea(phase: AnalysisPhase) {
                     )
                     // Route through our mini markdown renderer so headings and
                     // bullets render as formatted blocks instead of surfacing
-                    // literal `**asterisks**` and `## hashes` to the user.
-                    MarkdownContent(text = phase.summaryText)
+                    // literal `**asterisks**` and `## hashes` to the user. Also
+                    // strip the internal `GUIDANCE:` / `NHS_REFERENCE:` markers
+                    // — the pill above already conveys guidance, and the NHS
+                    // disclaimer below replays the reference in a consistent
+                    // place every time.
+                    MarkdownContent(
+                        text = com.example.mob_dev_portfolio.data.ai
+                            .AnalysisSummaryFormatter.stripInternalMarkers(phase.summaryText),
+                    )
+                    Text(
+                        "Not a diagnosis. For full symptom information on any condition named, check www.nhs.uk — call 111 for urgent advice or 999 in an emergency.",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        modifier = Modifier.testTag("analysis_live_nhs_note"),
+                    )
                 }
             }
         }
