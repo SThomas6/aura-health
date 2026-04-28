@@ -38,8 +38,10 @@ import net.zetetic.database.sqlcipher.SupportOpenHelperFactory
         DoctorVisitCoveredLog::class,
         DoctorDiagnosisEntity::class,
         DoctorDiagnosisLog::class,
+        com.example.mob_dev_portfolio.data.condition.HealthConditionEntity::class,
+        com.example.mob_dev_portfolio.data.condition.HealthConditionLog::class,
     ],
-    version = 10,
+    version = 11,
     exportSchema = false,
 )
 abstract class AuraDatabase : RoomDatabase() {
@@ -60,6 +62,8 @@ abstract class AuraDatabase : RoomDatabase() {
 
     abstract fun doctorDiagnosisDao(): DoctorDiagnosisDao
 
+    abstract fun healthConditionDao(): com.example.mob_dev_portfolio.data.condition.HealthConditionDao
+
     companion object {
         @Volatile
         private var instance: AuraDatabase? = null
@@ -68,7 +72,7 @@ abstract class AuraDatabase : RoomDatabase() {
          * Adds nullable location columns for the privacy-preserving location capture feature.
          * Nullable because location is opt-in per-log; existing rows should remain null.
          */
-        val MIGRATION_1_2: Migration = object : Migration(1, 2) {
+        private val MIGRATION_1_2: Migration = object : Migration(1, 2) {
             override fun migrate(db: SupportSQLiteDatabase) {
                 db.execSQL("ALTER TABLE symptom_logs ADD COLUMN locationLatitude REAL")
                 db.execSQL("ALTER TABLE symptom_logs ADD COLUMN locationLongitude REAL")
@@ -81,7 +85,7 @@ abstract class AuraDatabase : RoomDatabase() {
          * we never re-geocode on UI bind. Nullable so rows saved before this migration
          * surface the "Location unavailable" fallback without crashing.
          */
-        val MIGRATION_2_3: Migration = object : Migration(2, 3) {
+        private val MIGRATION_2_3: Migration = object : Migration(2, 3) {
             override fun migrate(db: SupportSQLiteDatabase) {
                 db.execSQL("ALTER TABLE symptom_logs ADD COLUMN locationName TEXT")
             }
@@ -93,7 +97,7 @@ abstract class AuraDatabase : RoomDatabase() {
          * best-effort: timeouts, offline saves, and HTTP errors must all
          * persist a row with null metrics rather than losing the symptom log.
          */
-        val MIGRATION_3_4: Migration = object : Migration(3, 4) {
+        private val MIGRATION_3_4: Migration = object : Migration(3, 4) {
             override fun migrate(db: SupportSQLiteDatabase) {
                 db.execSQL("ALTER TABLE symptom_logs ADD COLUMN weatherCode INTEGER")
                 db.execSQL("ALTER TABLE symptom_logs ADD COLUMN weatherDescription TEXT")
@@ -112,7 +116,7 @@ abstract class AuraDatabase : RoomDatabase() {
          * `summaryText` and `guidance` are always populated. Existing users
          * see an empty history list until their next analysis completes.
          */
-        val MIGRATION_4_5: Migration = object : Migration(4, 5) {
+        private val MIGRATION_4_5: Migration = object : Migration(4, 5) {
             override fun migrate(db: SupportSQLiteDatabase) {
                 db.execSQL(
                     """
@@ -149,7 +153,7 @@ abstract class AuraDatabase : RoomDatabase() {
          * `averageSeverity` is REAL + nullable because SQLite's AVG()
          * returns NULL over zero rows.
          */
-        val MIGRATION_5_6: Migration = object : Migration(5, 6) {
+        private val MIGRATION_5_6: Migration = object : Migration(5, 6) {
             override fun migrate(db: SupportSQLiteDatabase) {
                 db.execSQL(
                     """
@@ -179,7 +183,7 @@ abstract class AuraDatabase : RoomDatabase() {
          * granted at analysis time so the detail screen can reconstruct
          * the "considered" chip row without re-querying Health Connect.
          */
-        val MIGRATION_6_7: Migration = object : Migration(6, 7) {
+        private val MIGRATION_6_7: Migration = object : Migration(6, 7) {
             override fun migrate(db: SupportSQLiteDatabase) {
                 db.execSQL("ALTER TABLE analysis_runs ADD COLUMN healthMetricsCsv TEXT")
             }
@@ -200,7 +204,7 @@ abstract class AuraDatabase : RoomDatabase() {
          * the "last 30 days" history query avoids a full-table scan
          * once the table has thousands of rows.
          */
-        val MIGRATION_7_8: Migration = object : Migration(7, 8) {
+        private val MIGRATION_7_8: Migration = object : Migration(7, 8) {
             override fun migrate(db: SupportSQLiteDatabase) {
                 db.execSQL(
                     """
@@ -254,7 +258,7 @@ abstract class AuraDatabase : RoomDatabase() {
          * per-log query doesn't turn into a full-table scan once
          * the user has logged a month of photos.
          */
-        val MIGRATION_8_9: Migration = object : Migration(8, 9) {
+        private val MIGRATION_8_9: Migration = object : Migration(8, 9) {
             override fun migrate(db: SupportSQLiteDatabase) {
                 db.execSQL(
                     """
@@ -291,7 +295,7 @@ abstract class AuraDatabase : RoomDatabase() {
          *     wants annotated with a known diagnosis in AI output.
          *     Cascades on both sides.
          */
-        val MIGRATION_9_10: Migration = object : Migration(9, 10) {
+        private val MIGRATION_9_10: Migration = object : Migration(9, 10) {
             override fun migrate(db: SupportSQLiteDatabase) {
                 db.execSQL(
                     """
@@ -350,6 +354,53 @@ abstract class AuraDatabase : RoomDatabase() {
             }
         }
 
+        /**
+         * Adds the user-declared health condition tables. Distinct from
+         * the doctor-diagnosis system (which always lives under a
+         * specific visit) — these are standalone facts about the user
+         * captured at onboarding or via the dedicated Conditions
+         * settings screen.
+         *
+         *  - `health_conditions` — one row per condition the user has
+         *    declared (e.g. "Type 2 Diabetes"). Free-text name + notes,
+         *    no FK to doctor data.
+         *  - `health_condition_logs` — join: symptom logs the user
+         *    wants grouped under a condition. Cascades on both sides
+         *    so deleting a condition unlinks its logs and deleting a
+         *    log clears the link.
+         *
+         * Both flow into the AI's already-explained context bundle
+         * alongside the existing doctor-diagnosis data.
+         */
+        private val MIGRATION_10_11: Migration = object : Migration(10, 11) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                db.execSQL(
+                    """
+                    CREATE TABLE IF NOT EXISTS health_conditions (
+                        id INTEGER PRIMARY KEY AUTOINCREMENT NOT NULL,
+                        name TEXT NOT NULL,
+                        notes TEXT NOT NULL,
+                        createdAtEpochMillis INTEGER NOT NULL
+                    )
+                    """.trimIndent(),
+                )
+                db.execSQL(
+                    """
+                    CREATE TABLE IF NOT EXISTS health_condition_logs (
+                        conditionId INTEGER NOT NULL,
+                        logId INTEGER NOT NULL,
+                        PRIMARY KEY(conditionId, logId),
+                        FOREIGN KEY(conditionId) REFERENCES health_conditions(id) ON UPDATE NO ACTION ON DELETE CASCADE,
+                        FOREIGN KEY(logId) REFERENCES symptom_logs(id) ON UPDATE NO ACTION ON DELETE CASCADE
+                    )
+                    """.trimIndent(),
+                )
+                db.execSQL(
+                    "CREATE INDEX IF NOT EXISTS index_health_condition_logs_logId ON health_condition_logs(logId)",
+                )
+            }
+        }
+
         fun get(context: Context, passphrase: ByteArray): AuraDatabase =
             instance ?: synchronized(this) {
                 instance ?: Room.databaseBuilder(
@@ -368,6 +419,7 @@ abstract class AuraDatabase : RoomDatabase() {
                         MIGRATION_7_8,
                         MIGRATION_8_9,
                         MIGRATION_9_10,
+                        MIGRATION_10_11,
                     )
                     .build()
                     .also { instance = it }

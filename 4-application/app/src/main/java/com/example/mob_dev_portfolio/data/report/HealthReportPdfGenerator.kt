@@ -223,6 +223,29 @@ class HealthReportPdfGenerator(
         private var currentCanvas: Canvas? = null
         private var currentY: Float = marginY
 
+        /**
+         * Bitmaps drawn into [currentCanvas] this page that we must NOT
+         * recycle until [PdfDocument.finishPage] has serialised the page.
+         *
+         * Why this exists — root cause of the historical SIGSEGV:
+         *   `canvas.drawBitmap()` on a [PdfDocument.Page] canvas does NOT
+         *   immediately consume the bitmap's pixel buffer. PdfDocument
+         *   *defers* rasterisation until `finishPage()` runs, so the
+         *   library holds a native reference to the bitmap until then.
+         *   Calling `bitmap.recycle()` in between (the obvious "scoped"
+         *   pattern) frees the native pixel buffer; when finishPage()
+         *   later walks its draw list it dereferences a null pointer
+         *   and the process dies with `SIGSEGV / SEGV_MAPERR @ 0x0`.
+         *   The crash is intermittent because it depends on whether
+         *   that freed memory has been reused by another allocation
+         *   between recycle and finishPage.
+         *
+         * Fix: every bitmap created for the current page accumulates
+         * here, and [closePage] recycles them all *after* finishPage
+         * returns, when it is safe to do so.
+         */
+        private val bitmapsPendingRecycle: MutableList<android.graphics.Bitmap> = mutableListOf()
+
         // -------------------------------------------------------------
         // Reusable paint objects.
         // We used to allocate these per-draw-call, which meant a 30-log
@@ -321,7 +344,27 @@ class HealthReportPdfGenerator(
             if (snapshot.logs.isEmpty()) {
                 drawMuted("No symptom logs have been recorded yet.")
             } else {
-                snapshot.logs.forEach { drawLogEntry(it) }
+                snapshot.logs.forEach { log ->
+                    // Per-log try/catch: the PDF text/bitmap pipeline has
+                    // documented native crash surfaces (libminikin /
+                    // libhwui — see drawWrappedText kdoc). The defences
+                    // upstream of here (sanitiser, bitmap indirection,
+                    // simple line-break strategy) cover the known
+                    // patterns, but we'd rather skip a single
+                    // crash-triggering log than lose the whole report.
+                    runCatching { drawLogEntry(log) }
+                        .onFailure { err ->
+                            android.util.Log.w(
+                                "PdfGen",
+                                "Skipped log id=${log.id} after draw failure",
+                                err,
+                            )
+                            // Restart on a fresh page so half-drawn glyph
+                            // state from the failed entry can't leak into
+                            // the next one.
+                            runCatching { closePage(); openPage() }
+                        }
+                }
             }
             drawSpacer(14f)
             drawSectionTitle("AI analysis insights")
@@ -349,6 +392,13 @@ class HealthReportPdfGenerator(
             currentPage?.let { document.finishPage(it) }
             currentPage = null
             currentCanvas = null
+            // Now — and ONLY now — is it safe to free the bitmaps drawn
+            // into this page. See [bitmapsPendingRecycle] for why this
+            // can't happen at the per-bitmap call site.
+            bitmapsPendingRecycle.forEach {
+                runCatching { it.recycle() }
+            }
+            bitmapsPendingRecycle.clear()
         }
 
         /**
@@ -365,9 +415,14 @@ class HealthReportPdfGenerator(
         }
 
         private fun drawRunningFooter() {
-            val canvas = currentCanvas ?: return
             val y = pageHeight - marginY + 22f
-            canvas.drawText(
+            // Bitmap-backed — see drawSingleLineViaBitmap kdoc. Direct
+            // `canvas.drawText` on the PdfDocument canvas has been the
+            // root of native (libhwui/libminikin) SIGSEGVs in this
+            // codebase. The em dash + interpunct in the footer are
+            // exactly the sort of multi-byte chars that have triggered
+            // those crashes historically.
+            drawSingleLineViaBitmap(
                 "Aura Health — personal health report · page $pageIndex",
                 marginX,
                 y,
@@ -378,9 +433,15 @@ class HealthReportPdfGenerator(
         private fun drawHeader(snapshot: ReportSnapshot) {
             val canvas = currentCanvas ?: return
             ensureSpace(58f)
-            canvas.drawText("Aura Health Report", marginX, currentY + 18f, titlePaint)
+            // Bitmap-backed — see drawSingleLineViaBitmap kdoc.
+            drawSingleLineViaBitmap(
+                "Aura Health Report",
+                marginX,
+                currentY + 18f,
+                titlePaint,
+            )
             val generated = formatInstant(snapshot.generatedAtEpochMillis)
-            canvas.drawText(
+            drawSingleLineViaBitmap(
                 "Generated $generated · Chronological (oldest first)",
                 marginX,
                 currentY + 34f,
@@ -402,7 +463,8 @@ class HealthReportPdfGenerator(
         private fun drawSectionTitle(text: String) {
             val canvas = currentCanvas ?: return
             ensureSpace(24f)
-            canvas.drawText(text, marginX, currentY + 14f, sectionTitlePaint)
+            // Bitmap-backed — see drawSingleLineViaBitmap kdoc.
+            drawSingleLineViaBitmap(text, marginX, currentY + 14f, sectionTitlePaint)
             strokePaint.color = COLOR_RULE
             strokePaint.strokeWidth = 0.8f
             canvas.drawLine(
@@ -428,31 +490,64 @@ class HealthReportPdfGenerator(
         }
 
         private fun drawLogEntry(log: ReportLog) {
-            // Estimate block height so the whole entry stays together
-            // where possible (at minimum the title + date stay on the
-            // same page as the severity pill).
+            // The canvas is fetched at every use site rather than cached
+            // in a local. ROOT CAUSE OF THE HISTORICAL SIGSEGV CRASH:
+            //
+            //   `val canvas = currentCanvas` at the top of this function
+            //   captures the *current* page's canvas. Any helper called
+            //   below this point — drawSpacer, drawLabelledParagraph,
+            //   drawWrappedText — can trigger `ensureSpace`, which calls
+            //   `closePage()` (running `document.finishPage()`) and then
+            //   `openPage()` for a new page. After finishPage the old
+            //   page's canvas is dead at the native level. Drawing on it
+            //   ⇒ `SIGSEGV / SEGV_MAPERR @ 0x0`. The crash deterministically
+            //   landed on log #6 with seeded data because that's where
+            //   the trailing `drawSpacer(8f)` crossed the page boundary.
+            //
+            // Every direct canvas use below re-resolves `currentCanvas`
+            // so we always draw onto the live page.
             ensureSpace(72f)
-            val canvas = currentCanvas ?: return
-
+            if (currentCanvas == null) return
             drawSingleLineViaBitmap(
                 sanitizeForPdf(log.symptomName.ifBlank { "Untitled symptom" }),
                 marginX,
                 currentY + 12f,
                 entryTitlePaint,
             )
-            drawSeverityPill(canvas, log.severity, topY = currentY)
+            // Severity pill needs the live canvas — fetch fresh each
+            // time. drawSingleLineViaBitmap above doesn't page-break
+            // (its bitmap is small enough that ensureSpace isn't called),
+            // but defensively re-resolve anyway.
+            val pillCanvas = currentCanvas ?: return
+            drawSeverityPill(pillCanvas, log.severity, topY = currentY)
             currentY += 18f
 
             // Meta line (date · duration · location · weather)
+            //
+            // Two correctness notes:
+            //  - The temperature is formatted with [Locale.UK] explicitly,
+            //    not the default. `"%.1f".format(12.5)` returns "12,5" on
+            //    a comma-decimal locale (de-DE, fr-FR…). The PDF report
+            //    is intended to be doctor-readable English, so a stable
+            //    period-decimal beats following user locale here.
+            //  - The whole joined meta string is run through
+            //    [sanitizeForPdf] before drawing. Even though every
+            //    *user-supplied* piece is already sanitised at the call
+            //    site, the joiner ("  ·  ", U+00B7) and the hard-coded
+            //    "Started"/"Ended" prefixes are not — and the libminikin
+            //    SIGSEGV class doesn't care which token introduced the
+            //    crashing code-point, only that it lands in the same
+            //    StaticLayout. One scrub at the boundary is cheap insurance.
             val metaPieces = mutableListOf<String>()
             metaPieces += "Started ${formatInstant(log.startEpochMillis)}"
             log.endEpochMillis?.let { metaPieces += "Ended ${formatInstant(it)}" }
             if (!log.locationName.isNullOrBlank()) metaPieces += sanitizeForPdf(log.locationName)
             if (!log.weatherDescription.isNullOrBlank()) {
-                val temp = log.temperatureCelsius?.let { " (${"%.1f".format(it)}°C)" } ?: ""
+                val temp = log.temperatureCelsius
+                    ?.let { " (${"%.1f".format(java.util.Locale.UK, it)}°C)" } ?: ""
                 metaPieces += "${sanitizeForPdf(log.weatherDescription)}$temp"
             }
-            drawWrappedText(metaPieces.joinToString("  ·  "), metaPaint)
+            drawWrappedText(sanitizeForPdf(metaPieces.joinToString("  ·  ")), metaPaint)
 
             if (log.description.isNotBlank()) {
                 drawSpacer(3f)
@@ -480,10 +575,16 @@ class HealthReportPdfGenerator(
                 drawPhotoRow(log.photoJpegBytes)
             }
             // Subtle rule between entries.
+            //
+            // drawSpacer can page-break — re-resolve the canvas afterwards
+            // because the value we'd have captured at the top of this
+            // function points at a now-finished page. See the kdoc-style
+            // comment at the top of drawLogEntry for the SIGSEGV history.
             drawSpacer(8f)
             strokePaint.color = COLOR_RULE_SOFT
             strokePaint.strokeWidth = 0.5f
-            canvas.drawLine(marginX, currentY, pageWidth - marginX, currentY, strokePaint)
+            val ruleCanvas = currentCanvas ?: return
+            ruleCanvas.drawLine(marginX, currentY, pageWidth - marginX, currentY, strokePaint)
             currentY += 10f
         }
 
@@ -547,7 +648,9 @@ class HealthReportPdfGenerator(
                     }
                     canvas.drawBitmap(bitmap, src, rect, null)
                     canvas.restore()
-                    bitmap.recycle()
+                    // Defer recycling until the page is finished — see
+                    // [bitmapsPendingRecycle] for the SIGSEGV root cause.
+                    bitmapsPendingRecycle += bitmap
                 }
             }
             currentY += tileHeight
@@ -588,19 +691,21 @@ class HealthReportPdfGenerator(
 
         private fun drawAnalysisEntry(analysis: ReportAnalysis) {
             ensureSpace(56f)
-            val canvas = currentCanvas ?: return
+            // No top-of-function `val canvas = currentCanvas` — see the
+            // SIGSEGV note in [drawLogEntry]. Every direct canvas use
+            // re-resolves so we never draw on a finished page.
+            if (currentCanvas == null) return
             // Headlines are fixed enum strings today, but cheap to
             // sanitize anyway — guards against a future change that
             // starts propagating model output into this field.
-            // Bitmap-backed to match drawWrappedText and avoid the PDF
-            // canvas text-pipeline SIGSEGV on Samsung One UI 4.
             drawSingleLineViaBitmap(
                 sanitizeForPdf(analysis.headline),
                 marginX,
                 currentY + 12f,
                 entryTitlePaint,
             )
-            drawGuidancePill(canvas, analysis.guidance, topY = currentY)
+            val pillCanvas = currentCanvas ?: return
+            drawGuidancePill(pillCanvas, analysis.guidance, topY = currentY)
             currentY += 18f
 
             drawSingleLineViaBitmap(
@@ -648,7 +753,9 @@ class HealthReportPdfGenerator(
             drawSpacer(8f)
             strokePaint.color = COLOR_RULE_SOFT
             strokePaint.strokeWidth = 0.5f
-            canvas.drawLine(marginX, currentY, pageWidth - marginX, currentY, strokePaint)
+            // Re-resolve canvas — drawSpacer above can page-break.
+            val ruleCanvas = currentCanvas ?: return
+            ruleCanvas.drawLine(marginX, currentY, pageWidth - marginX, currentY, strokePaint)
             currentY += 10f
         }
 
@@ -668,7 +775,13 @@ class HealthReportPdfGenerator(
             val rect = RectF(x, topY, x + pillWidth, topY + pillHeight)
             fillPaint.color = severityFillColor(severity)
             canvas.drawRoundRect(rect, pillHeight / 2f, pillHeight / 2f, fillPaint)
-            canvas.drawText(label, x + 9f, topY + 11f, pillLabelPaint)
+            // Bitmap-backed text — same rationale as the entry title path:
+            // direct `canvas.drawText` on the PdfDocument canvas has been
+            // the source of native (libhwui/libminikin) SIGSEGV crashes
+            // in this codebase. Going through an offscreen bitmap routes
+            // the shaper away from the PDF text pipeline, which is where
+            // the null-deref happens. The visual result is pixel-identical.
+            drawSingleLineViaBitmap(label, x + 9f, topY + 11f, pillLabelPaint)
         }
 
         private fun drawGuidancePill(
@@ -689,7 +802,8 @@ class HealthReportPdfGenerator(
             val rect = RectF(x, topY, x + pillWidth, topY + pillHeight)
             fillPaint.color = fill
             canvas.drawRoundRect(rect, pillHeight / 2f, pillHeight / 2f, fillPaint)
-            canvas.drawText(label, x + 9f, topY + 11f, pillLabelPaint)
+            // Bitmap-backed — see drawSingleLineViaBitmap kdoc.
+            drawSingleLineViaBitmap(label, x + 9f, topY + 11f, pillLabelPaint)
         }
 
         private fun drawSummary(snapshot: ReportSnapshot) {
@@ -707,30 +821,32 @@ class HealthReportPdfGenerator(
             )
             canvas.drawRoundRect(rect, 10f, 10f, fillPaint)
 
-            canvas.drawText("Summary", marginX + 14f, currentY + 20f, summaryTitlePaint)
+            // All summary text bitmap-backed — see drawSingleLineViaBitmap
+            // kdoc for the libminikin SIGSEGV rationale.
+            drawSingleLineViaBitmap("Summary", marginX + 14f, currentY + 20f, summaryTitlePaint)
 
             val columnWidth = (printableWidth - 28f) / 2f
             val leftX = marginX + 14f
             val rightX = leftX + columnWidth
 
-            canvas.drawText("Total symptom entries", leftX, currentY + 40f, metaPaint)
-            canvas.drawText(
+            drawSingleLineViaBitmap("Total symptom entries", leftX, currentY + 40f, metaPaint)
+            drawSingleLineViaBitmap(
                 snapshot.totalLogCount.toString(),
                 leftX,
                 currentY + 66f,
                 summaryValuePaint,
             )
 
-            canvas.drawText("Average severity", rightX, currentY + 40f, metaPaint)
+            drawSingleLineViaBitmap("Average severity", rightX, currentY + 40f, metaPaint)
             val avg = snapshot.averageSeverity
             val avgLabel = if (avg == null) {
                 "—"
             } else {
-                "${"%.2f".format(avg)} / 10"
+                "${"%.2f".format(java.util.Locale.UK, avg)} / 10"
             }
-            canvas.drawText(avgLabel, rightX, currentY + 66f, summaryValuePaint)
+            drawSingleLineViaBitmap(avgLabel, rightX, currentY + 66f, summaryValuePaint)
 
-            canvas.drawText(
+            drawSingleLineViaBitmap(
                 "Computed directly from the symptom_logs table (COUNT + AVG).",
                 leftX,
                 currentY + 86f,
@@ -846,13 +962,12 @@ class HealthReportPdfGenerator(
         ) {
             val canvas = currentCanvas ?: return
             val bitmap = Bitmap.createBitmap(width, height, Bitmap.Config.ARGB_8888)
-            try {
-                val offscreen = Canvas(bitmap)
-                layout.draw(offscreen)
-                canvas.drawBitmap(bitmap, marginX, currentY, null)
-            } finally {
-                bitmap.recycle()
-            }
+            val offscreen = Canvas(bitmap)
+            layout.draw(offscreen)
+            canvas.drawBitmap(bitmap, marginX, currentY, null)
+            // Defer recycling until the page is finished — see
+            // [bitmapsPendingRecycle] for the SIGSEGV root cause.
+            bitmapsPendingRecycle += bitmap
         }
 
         /**
@@ -881,13 +996,12 @@ class HealthReportPdfGenerator(
             val descent = fm.descent
             val bmpHeight = (ascent + descent).toInt().coerceAtLeast(1)
             val bitmap = Bitmap.createBitmap(measuredWidth, bmpHeight, Bitmap.Config.ARGB_8888)
-            try {
-                val offscreen = Canvas(bitmap)
-                offscreen.drawText(text, 0f, ascent, paint)
-                canvas.drawBitmap(bitmap, x, baselineY - ascent, null)
-            } finally {
-                bitmap.recycle()
-            }
+            val offscreen = Canvas(bitmap)
+            offscreen.drawText(text, 0f, ascent, paint)
+            canvas.drawBitmap(bitmap, x, baselineY - ascent, null)
+            // Defer recycling until the page is finished — see
+            // [bitmapsPendingRecycle] for the SIGSEGV root cause.
+            bitmapsPendingRecycle += bitmap
         }
     }
 
@@ -1013,7 +1127,18 @@ class HealthReportPdfGenerator(
         val dateTime = Instant.ofEpochMilli(epochMillis)
             .atZone(ZoneId.systemDefault())
             .toLocalDateTime()
-        return dateTime.format(DATE_FMT)
+        // Locale.UK (not getDefault) for two reasons:
+        //  1. The PDF is the doctor-handover artefact. Doctors want
+        //     stable English month names ("26 Apr 2026"), not whatever
+        //     locale the patient's phone happens to be set to.
+        //  2. Locale.getDefault() can pull in non-Latin month names
+        //     (Cyrillic, Arabic, Han) that have triggered libminikin
+        //     SIGSEGVs on the bitmap text path in the past. UK month
+        //     names stay in the ASCII Latin block.
+        // Built per-call to dodge the "Constant Locale" lint warning
+        // and to cost nothing on the cold-start path.
+        val fmt = DateTimeFormatter.ofPattern("d MMM yyyy · HH:mm", Locale.UK)
+        return dateTime.format(fmt)
     }
 
     companion object {
@@ -1045,9 +1170,6 @@ class HealthReportPdfGenerator(
          * Matches the "Notes" / "Medication" label spacing.
          */
         private const val PHOTO_CAPTION_HEIGHT_PT: Float = 14f
-
-        private val DATE_FMT: DateTimeFormatter =
-            DateTimeFormatter.ofPattern("d MMM yyyy · HH:mm", Locale.getDefault())
 
         // Paint colours — plain RGB ints (not Compose Colors) since
         // android.graphics.Paint works in the classic colour space.

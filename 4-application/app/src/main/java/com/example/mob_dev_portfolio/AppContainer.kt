@@ -6,10 +6,10 @@ import androidx.datastore.core.DataStore
 import androidx.datastore.preferences.core.Preferences
 import androidx.datastore.preferences.preferencesDataStore
 import com.example.mob_dev_portfolio.data.AuraDatabase
-import com.example.mob_dev_portfolio.data.SymptomLogEntity
 import com.example.mob_dev_portfolio.data.SymptomLogRepository
 import com.example.mob_dev_portfolio.data.SymptomLogSeeder
 import com.example.mob_dev_portfolio.data.doctor.DoctorVisitRepository
+import com.example.mob_dev_portfolio.data.doctor.DoctorVisitSeeder
 import androidx.work.WorkManager
 import com.example.mob_dev_portfolio.data.ai.AnalysisHistoryRepository
 import com.example.mob_dev_portfolio.data.ai.AnalysisResultStore
@@ -178,6 +178,16 @@ interface AppContainer {
     val symptomLogSeeder: SymptomLogSeeder
 
     /**
+     * Companion seeder that adds a couple of plausible doctor visits
+     * (with linked diagnoses and a cleared log) once the symptom seed
+     * has landed. Exists so the Doctor Visits tab, the AI pipeline's
+     * doctor-context branch, and the per-log "linked to diagnosis"
+     * badge on the symptom detail screen all have something to render
+     * on a fresh install of the demo flavor.
+     */
+    val doctorVisitSeeder: DoctorVisitSeeder
+
+    /**
      * Room-backed store of medication reminders + their append-only dose
      * history. Writes from the editor UI and the [MedicationReminderReceiver];
      * reads drive the list/history screens and the Home preview card.
@@ -210,6 +220,15 @@ interface AppContainer {
      * so the model treats them as known context.
      */
     val doctorVisitRepository: DoctorVisitRepository
+
+    /**
+     * Backs the user-declared health-condition feature: standalone
+     * conditions like "Type 2 Diabetes" the user adds during onboarding
+     * or via the Conditions settings screen, plus the join with symptom
+     * logs so History can group them and the AI gets them as
+     * already-explained context.
+     */
+    val healthConditionRepository: com.example.mob_dev_portfolio.data.condition.HealthConditionRepository
 }
 
 class DefaultAppContainer(
@@ -346,6 +365,7 @@ class DefaultAppContainer(
             symptomLogDao = database.symptomLogDao(),
             analysisRunDao = database.analysisRunDao(),
             photoRepository = symptomPhotoRepository,
+            doctorVisitRepository = doctorVisitRepository,
         )
     }
 
@@ -380,6 +400,13 @@ class DefaultAppContainer(
         SymptomLogSeeder(repository = symptomLogRepository)
     }
 
+    override val doctorVisitSeeder: DoctorVisitSeeder by lazy {
+        DoctorVisitSeeder(
+            visitRepository = doctorVisitRepository,
+            symptomLogRepository = symptomLogRepository,
+        )
+    }
+
     override val medicationRepository: MedicationRepository by lazy {
         MedicationRepository(
             reminderDao = database.medicationReminderDao(),
@@ -407,6 +434,13 @@ class DefaultAppContainer(
             database = database,
             visitDao = database.doctorVisitDao(),
             diagnosisDao = database.doctorDiagnosisDao(),
+        )
+    }
+
+    override val healthConditionRepository: com.example.mob_dev_portfolio.data.condition.HealthConditionRepository by lazy {
+        com.example.mob_dev_portfolio.data.condition.HealthConditionRepository(
+            database = database,
+            dao = database.healthConditionDao(),
         )
     }
 

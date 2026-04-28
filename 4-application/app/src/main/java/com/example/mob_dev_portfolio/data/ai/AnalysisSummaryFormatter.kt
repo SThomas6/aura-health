@@ -24,7 +24,7 @@ package com.example.mob_dev_portfolio.data.ai
 object AnalysisSummaryFormatter {
 
     /** Marker the prompt asks the model to emit as the last line. */
-    const val NHS_REFERENCE_URL: String = "https://www.nhs.uk"
+    private const val NHS_REFERENCE_URL: String = "https://www.nhs.uk"
 
     private val GUIDANCE_LINE = Regex("""(?i)^\s*guidance\s*[:\-].*$""")
     private val NHS_LINE = Regex("""(?i)^\s*nhs_reference\s*[:\-].*$""")

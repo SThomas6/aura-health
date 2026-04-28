@@ -20,6 +20,7 @@ import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.DarkMode
 import androidx.compose.material.icons.filled.Favorite
+import androidx.compose.material.icons.filled.HealthAndSafety
 import androidx.compose.material.icons.filled.Fingerprint
 import androidx.compose.material.icons.filled.LightMode
 import androidx.compose.material.icons.filled.Medication
@@ -83,6 +84,7 @@ fun SettingsScreen(
     onBack: () -> Unit,
     onOpenDemographicProfile: () -> Unit,
     onOpenHealthDataSettings: () -> Unit,
+    onOpenHealthConditions: () -> Unit,
     themeViewModel: ThemePrefsViewModel = viewModel(factory = ThemePrefsViewModel.Factory),
     biometricViewModel: BiometricSettingsViewModel = viewModel(factory = BiometricSettingsViewModel.Factory),
     medicationViewModel: MedicationRemindersSettingsViewModel = viewModel(factory = MedicationRemindersSettingsViewModel.Factory),
@@ -164,6 +166,13 @@ fun SettingsScreen(
                 icon = Icons.Filled.Favorite,
                 onClick = onOpenHealthDataSettings,
                 testTag = "settings_health_data",
+            )
+            SettingsNavCard(
+                title = "Health conditions",
+                subtitle = "Add chronic or pre-existing conditions (e.g. diabetes, asthma) so the AI has context and your symptom logs can be grouped.",
+                icon = Icons.Filled.HealthAndSafety,
+                onClick = onOpenHealthConditions,
+                testTag = "settings_health_conditions",
             )
             Spacer(Modifier.size(8.dp))
         }

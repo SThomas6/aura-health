@@ -125,6 +125,7 @@ fun LogSymptomScreen(
 ) {
     val uiState by viewModel.state.collectAsStateWithLifecycle()
     val diagnoses by viewModel.diagnoses.collectAsStateWithLifecycle()
+    val healthConditions by viewModel.healthConditions.collectAsStateWithLifecycle()
     val snackbarHost = remember { SnackbarHostState() }
     val context = LocalContext.current
 
@@ -398,12 +399,25 @@ fun LogSymptomScreen(
                 HorizontalDivider()
                 SectionHeader(
                     "Link to diagnosis",
-                    "Tag this log to a doctor-flagged issue (optional).",
+                    "Tag this log to a doctor-confirmed diagnosis from a visit (optional).",
                 )
                 DiagnosisPicker(
                     diagnoses = diagnoses,
                     selectedId = uiState.selectedDiagnosisId,
                     onSelect = viewModel::onSelectDiagnosis,
+                )
+            }
+
+            if (healthConditions.isNotEmpty()) {
+                HorizontalDivider()
+                SectionHeader(
+                    "Group under a condition",
+                    "Pin this log to one of your standing health conditions so it shows up grouped on the Symptoms list (optional).",
+                )
+                HealthConditionPicker(
+                    conditions = healthConditions,
+                    selectedId = uiState.selectedConditionId,
+                    onSelect = viewModel::onSelectCondition,
                 )
             }
 
@@ -567,6 +581,65 @@ private fun DiagnosisPicker(
                         onSelect(diagnosis.id)
                     },
                     modifier = Modifier.testTag("diagnosis_option_${diagnosis.id}"),
+                )
+            }
+        }
+    }
+}
+
+/**
+ * Mirror of [DiagnosisPicker] for user-declared health conditions.
+ * Two separate composables (rather than a generic one) because the
+ * domain models live in different modules and the test tags differ —
+ * keeping them parallel makes the rendering trivial to read.
+ */
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+private fun HealthConditionPicker(
+    conditions: List<com.example.mob_dev_portfolio.data.condition.HealthCondition>,
+    selectedId: Long?,
+    onSelect: (Long?) -> Unit,
+) {
+    var expanded by rememberSaveable { mutableStateOf(false) }
+    val selectedLabel = remember(selectedId, conditions) {
+        conditions.firstOrNull { it.id == selectedId }?.name
+    }
+
+    ExposedDropdownMenuBox(
+        expanded = expanded,
+        onExpandedChange = { expanded = it },
+    ) {
+        OutlinedTextField(
+            value = selectedLabel ?: "None",
+            onValueChange = {},
+            readOnly = true,
+            label = { Text("Health condition") },
+            trailingIcon = { ExposedDropdownMenuDefaults.TrailingIcon(expanded = expanded) },
+            modifier = Modifier
+                .menuAnchor(MenuAnchorType.PrimaryNotEditable, enabled = true)
+                .fillMaxWidth()
+                .testTag("field_condition_link"),
+        )
+        ExposedDropdownMenu(
+            expanded = expanded,
+            onDismissRequest = { expanded = false },
+        ) {
+            DropdownMenuItem(
+                text = { Text("None") },
+                onClick = {
+                    expanded = false
+                    onSelect(null)
+                },
+                modifier = Modifier.testTag("condition_option_none"),
+            )
+            conditions.forEach { condition ->
+                DropdownMenuItem(
+                    text = { Text(condition.name) },
+                    onClick = {
+                        expanded = false
+                        onSelect(condition.id)
+                    },
+                    modifier = Modifier.testTag("condition_option_${condition.id}"),
                 )
             }
         }

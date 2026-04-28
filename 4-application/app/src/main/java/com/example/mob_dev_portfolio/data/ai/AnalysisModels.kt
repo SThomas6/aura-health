@@ -29,6 +29,16 @@ data class AnalysisRequest(
      * [AnalysisService.buildRequest].
      */
     val knownDiagnoses: List<KnownDiagnosis> = emptyList(),
+    /**
+     * User-declared standing health conditions (e.g. "Type 2 Diabetes",
+     * "Asthma"). These are *not* tied to a specific doctor visit — the
+     * user added them in onboarding or via the Conditions settings
+     * screen. The prompt builder emits them as a parallel "user has
+     * told us they have" context block alongside [knownDiagnoses] so
+     * the model treats linked symptoms as already-explained without
+     * conflating them with visit-specific diagnoses.
+     */
+    val userDeclaredConditions: List<UserDeclaredCondition> = emptyList(),
 ) {
     data class SanitizedLog(
         val symptomName: String,
@@ -60,6 +70,15 @@ data class AnalysisRequest(
          * target. Null for unlinked logs.
          */
         val diagnosisLabel: String? = null,
+        /**
+         * If the user has grouped this symptom under one of their
+         * standing health conditions (e.g. "Type 2 Diabetes"), the
+         * condition name is echoed here. Distinct from
+         * [diagnosisLabel] so the prompt can separate "doctor said you
+         * have X" from "user told us they have X". Null for ungrouped
+         * logs.
+         */
+        val userConditionLabel: String? = null,
     )
 
     /**
@@ -77,6 +96,17 @@ data class AnalysisRequest(
             val startIsoDate: String,
         )
     }
+
+    /**
+     * Mirror of [KnownDiagnosis] for user-declared standing conditions.
+     * Same shape (label + brief history) so prompt construction is
+     * symmetric, but a separate type to keep the "doctor confirmed" /
+     * "user declared" distinction explicit through the whole pipeline.
+     */
+    data class UserDeclaredCondition(
+        val label: String,
+        val history: List<KnownDiagnosis.HistoryEntry>,
+    )
 
     /**
      * The 7-day health aggregate + body measurements that frame the

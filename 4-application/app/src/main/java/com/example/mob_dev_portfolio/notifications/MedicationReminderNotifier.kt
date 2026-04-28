@@ -50,7 +50,7 @@ open class MedicationReminderNotifier(
 ) {
 
     open fun ensureChannel() {
-        val manager = context.getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
+        val manager = context.getSystemService(NotificationManager::class.java)
         if (manager.getNotificationChannel(CHANNEL_ID) != null) return
         val channel = NotificationChannel(
             CHANNEL_ID,

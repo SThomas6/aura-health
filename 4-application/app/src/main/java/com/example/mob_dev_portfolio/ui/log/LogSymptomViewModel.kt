@@ -86,6 +86,15 @@ data class LogSymptomUiState(
      * hydrated from the existing link so the picker reflects reality.
      */
     val selectedDiagnosisId: Long? = null,
+    /**
+     * Id of the user-declared health condition this log is grouped
+     * under, or null. Persisted post-save via
+     * [com.example.mob_dev_portfolio.data.condition.HealthConditionRepository.setLogCondition].
+     * Distinct from [selectedDiagnosisId]: that one represents a
+     * doctor-confirmed diagnosis tied to a specific visit, this one
+     * represents a standing condition the user added themselves.
+     */
+    val selectedConditionId: Long? = null,
 )
 
 class LogSymptomViewModel(
@@ -100,6 +109,13 @@ class LogSymptomViewModel(
      * empty and [save] no-ops on the attach call.
      */
     private val doctorVisitRepository: DoctorVisitRepository? = null,
+    /**
+     * Optional user-declared health-condition repo. Same nullability
+     * rationale as [doctorVisitRepository] — older test doubles don't
+     * exercise the conditions feature, so an absent repo just means
+     * the picker renders empty and [save] no-ops on the link call.
+     */
+    private val healthConditionRepository: com.example.mob_dev_portfolio.data.condition.HealthConditionRepository? = null,
     private val editingId: Long = 0L,
     private val nowProvider: () -> Long = { System.currentTimeMillis() },
     private val environmentalTimeoutMillis: Long = ENVIRONMENTAL_FETCH_TIMEOUT_MILLIS,
@@ -124,11 +140,22 @@ class LogSymptomViewModel(
         (doctorVisitRepository?.observeAllDiagnoses() ?: flowOf(emptyList()))
             .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000L), emptyList())
 
+    /**
+     * User-declared health conditions, available for the "group under
+     * a condition" dropdown on the editor. Empty list when the repo
+     * isn't wired or the user has declared none — the picker renders
+     * itself out in that case so the form stays uncluttered.
+     */
+    val healthConditions: StateFlow<List<com.example.mob_dev_portfolio.data.condition.HealthCondition>> =
+        (healthConditionRepository?.observeAll() ?: flowOf(emptyList()))
+            .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000L), emptyList())
+
     init {
         if (editingId != 0L) {
             loadForEditing()
             observeAttachedPhotos(editingId)
             loadExistingDiagnosisLink(editingId)
+            loadExistingConditionLink(editingId)
         }
     }
 
@@ -217,6 +244,23 @@ class LogSymptomViewModel(
      */
     fun onSelectDiagnosis(diagnosisId: Long?) {
         _state.update { it.copy(selectedDiagnosisId = diagnosisId) }
+    }
+
+    /** UI handler for the user-declared condition picker. */
+    fun onSelectCondition(conditionId: Long?) {
+        _state.update { it.copy(selectedConditionId = conditionId) }
+    }
+
+    /**
+     * Read the current condition link for the log being edited so the
+     * picker opens reflecting reality.
+     */
+    private fun loadExistingConditionLink(id: Long) {
+        val repo = healthConditionRepository ?: return
+        viewModelScope.launch {
+            val linked = runCatching { repo.observeConditionForLog(id).first() }.getOrNull()
+            _state.update { it.copy(selectedConditionId = linked?.id) }
+        }
     }
 
     fun onSymptomNameChange(value: String) = updateDraft(LogField.SymptomName) { copy(symptomName = value) }
@@ -457,6 +501,7 @@ class LogSymptomViewModel(
             // — the log itself is already saved and a missing link is
             // recoverable from the doctor-visits screen.
             applyDiagnosisLink(savedId, current.selectedDiagnosisId)
+            applyConditionLink(savedId, current.selectedConditionId)
             // Pick the most important warning to surface. Location warnings
             // already exist from the previous story; the environmental layer
             // adds its own (timeout, offline, API error). Both go to the same
@@ -502,6 +547,15 @@ class LogSymptomViewModel(
                 repo.detachLogFromAllDiagnoses(logId)
             }
         }
+    }
+
+    /**
+     * Persist the selected user-condition link (or clear it). Mirrors
+     * [applyDiagnosisLink] — silently no-ops when the repo isn't wired.
+     */
+    private suspend fun applyConditionLink(logId: Long, conditionId: Long?) {
+        val repo = healthConditionRepository ?: return
+        runCatching { repo.setLogCondition(logId, conditionId) }
     }
 
     /**
@@ -690,6 +744,7 @@ class LogSymptomViewModel(
                     environmentalService = app.container.environmentalService,
                     symptomPhotoRepository = app.container.symptomPhotoRepository,
                     doctorVisitRepository = app.container.doctorVisitRepository,
+                    healthConditionRepository = app.container.healthConditionRepository,
                 ) as T
             }
         }
@@ -705,6 +760,7 @@ class LogSymptomViewModel(
                     environmentalService = app.container.environmentalService,
                     symptomPhotoRepository = app.container.symptomPhotoRepository,
                     doctorVisitRepository = app.container.doctorVisitRepository,
+                    healthConditionRepository = app.container.healthConditionRepository,
                     editingId = id,
                 ) as T
             }

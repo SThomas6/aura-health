@@ -32,6 +32,17 @@ data class LogDetailUiState(
     val isDeleting: Boolean = false,
     val deleted: Boolean = false,
     val deleteError: String? = null,
+    /**
+     * One-shot signal telling the UI to surface an "Symptom ended — Undo"
+     * snackbar after the user taps "End now". Carries the prior end-time
+     * (null for the typical "was ongoing" case) so undo can restore it
+     * exactly.
+     */
+    val justEnded: JustEndedSignal? = null,
+)
+
+data class JustEndedSignal(
+    val previousEndEpochMillis: Long?,
 )
 
 class LogDetailViewModel(
@@ -114,6 +125,47 @@ class LogDetailViewModel(
 
     fun dismissDeleteError() {
         _state.update { it.copy(deleteError = null) }
+    }
+
+    /**
+     * Quick-end action — sets `endEpochMillis` to "now" without taking
+     * the user through the full editor. The previous end time (typically
+     * null, since the button is only shown for ongoing logs) is carried
+     * back via [JustEndedSignal] so the screen can offer Undo.
+     *
+     * No-op if the log isn't currently loaded or has already ended:
+     * the button shouldn't be visible in those cases, but defensive
+     * either way so a quick double-tap can't double-write.
+     */
+    fun endNow(now: Long = System.currentTimeMillis()) {
+        val current = (log.value as? DetailLogState.Loaded)?.log ?: return
+        if (current.endEpochMillis != null) return
+        viewModelScope.launch {
+            val updated = current.copy(endEpochMillis = now)
+            runCatching { repository.update(updated) }
+                .onSuccess {
+                    _state.update {
+                        it.copy(justEnded = JustEndedSignal(previousEndEpochMillis = null))
+                    }
+                }
+        }
+    }
+
+    /**
+     * Restore the symptom to its prior (ongoing) state. Wired to the
+     * "Undo" action on the snackbar fired by [endNow].
+     */
+    fun undoEnd(signal: JustEndedSignal) {
+        val current = (log.value as? DetailLogState.Loaded)?.log ?: return
+        viewModelScope.launch {
+            val restored = current.copy(endEpochMillis = signal.previousEndEpochMillis)
+            runCatching { repository.update(restored) }
+            _state.update { it.copy(justEnded = null) }
+        }
+    }
+
+    fun consumeJustEnded() {
+        _state.update { it.copy(justEnded = null) }
     }
 
     companion object {

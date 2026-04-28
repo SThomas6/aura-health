@@ -113,6 +113,14 @@ class AnalysisWorker(
                 container.doctorVisitRepository.snapshotForAnalysis()
             }.getOrDefault(DoctorContextSnapshot.Empty)
 
+            // User-declared standing conditions (e.g. "Type 2 Diabetes")
+            // — feeds the prompt's "background context" block alongside
+            // the doctor-confirmed diagnoses. Same soft-failure rule as
+            // doctorContext: an empty snapshot can never block the run.
+            val userConditions = runCatching {
+                container.healthConditionRepository.snapshotForAnalysis()
+            }.getOrDefault(com.example.mob_dev_portfolio.data.condition.UserConditionsSnapshot.Empty)
+
             val outcome = withTimeout(TIMEOUT_MILLIS) {
                 container.analysisService.analyze(
                     profile = profile,
@@ -120,6 +128,7 @@ class AnalysisWorker(
                     logs = logs,
                     healthSnapshot = healthSnapshot,
                     doctorContext = doctorContext,
+                    userConditions = userConditions,
                 )
             }
 

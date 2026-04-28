@@ -7,6 +7,7 @@ import android.graphics.pdf.PdfRenderer
 import android.os.ParcelFileDescriptor
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxWithConstraints
@@ -62,6 +63,14 @@ fun PdfPreview(
     modifier: Modifier = Modifier,
     horizontalPadding: Dp = 16.dp,
     onPageCountChanged: (Int) -> Unit = {},
+    /**
+     * Optional click callback. When non-null, every rendered page tile
+     * becomes tappable and forwards the click here — used by the report
+     * screen to open the same preview composable inside a full-screen
+     * dialog. Null disables the affordance (e.g. when this composable
+     * is *already* the full-screen view).
+     */
+    onPageClick: (() -> Unit)? = null,
 ) {
     val context = LocalContext.current
     val session = remember(file) { PdfRenderSession(context = context, file = file) }
@@ -87,6 +96,7 @@ fun PdfPreview(
                 session = session,
                 pageIndex = index,
                 modifier = Modifier.testTag("report_pdf_page_$index"),
+                onClick = onPageClick,
             )
         }
         if (session.pageCount == 0) {
@@ -106,6 +116,7 @@ private fun PdfPageTile(
     session: PdfRenderSession,
     pageIndex: Int,
     modifier: Modifier = Modifier,
+    onClick: (() -> Unit)? = null,
 ) {
     // The page's native size dictates the render aspect; we size the
     // Image to the container width and match the page aspect so the
@@ -116,7 +127,13 @@ private fun PdfPageTile(
         modifier = modifier
             .fillMaxWidth()
             .clip(RoundedCornerShape(12.dp))
-            .background(MaterialTheme.colorScheme.surfaceContainerLow),
+            .background(MaterialTheme.colorScheme.surfaceContainerLow)
+            // Clickable only when the caller hands us a handler — keeps
+            // the fullscreen dialog (which re-uses this composable) from
+            // becoming clickable into another nested fullscreen.
+            .then(
+                if (onClick != null) Modifier.clickable(onClick = onClick) else Modifier,
+            ),
     ) {
         val density = LocalDensity.current
         val widthPx = with(density) { maxWidth.toPx().toInt().coerceAtLeast(1) }

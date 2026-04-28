@@ -141,9 +141,10 @@ fun DoctorVisitEditorScreen(
             HorizontalDivider()
 
             SectionHeader(
-                title = "Issues the doctor flagged",
-                subtitle = "Link the symptoms that relate to each issue. The AI will treat linked " +
-                    "symptoms as already-explained.",
+                title = "Diagnoses given at this visit",
+                subtitle = "If the doctor diagnosed something (e.g. \"Migraine\", \"Iron deficiency\"), " +
+                    "add it here and link the symptom logs that relate to it. The AI will then treat " +
+                    "those logs as already-explained context rather than new concerns.",
             )
 
             state.diagnoses.forEach { row ->
@@ -165,7 +166,7 @@ fun DoctorVisitEditorScreen(
             ) {
                 Icon(Icons.Filled.Add, contentDescription = null)
                 Spacer(Modifier.width(8.dp))
-                Text("Add another issue")
+                Text("Add another diagnosis")
             }
 
             state.error?.let { msg ->
@@ -325,30 +326,31 @@ private fun DiagnosisEditor(
         ) {
             Row(verticalAlignment = Alignment.CenterVertically) {
                 Text(
-                    text = "Issue",
+                    text = "Diagnosis",
                     style = MaterialTheme.typography.labelLarge,
                     modifier = Modifier.weight(1f),
                 )
                 IconButton(onClick = onRemove) {
-                    Icon(Icons.Filled.Close, contentDescription = "Remove issue")
+                    Icon(Icons.Filled.Close, contentDescription = "Remove diagnosis")
                 }
             }
             OutlinedTextField(
                 value = row.label,
                 onValueChange = onLabelChange,
-                label = { Text("Label") },
-                placeholder = { Text("e.g. Chronic migraine") },
+                label = { Text("Diagnosis name") },
+                placeholder = { Text("e.g. Chronic migraine, Iron deficiency") },
                 singleLine = true,
                 modifier = Modifier.fillMaxWidth(),
             )
             OutlinedTextField(
                 value = row.notes,
                 onValueChange = onNotesChange,
-                label = { Text("Notes (optional)") },
+                label = { Text("Doctor's notes (optional)") },
+                placeholder = { Text("Any extra detail the doctor mentioned.") },
                 modifier = Modifier.fillMaxWidth().heightIn(min = 80.dp),
             )
             Text(
-                text = "Related symptoms",
+                text = "Symptom logs caused by this diagnosis",
                 style = MaterialTheme.typography.labelLarge,
             )
             val linked = logs.filter { it.id in linkedLogIds }

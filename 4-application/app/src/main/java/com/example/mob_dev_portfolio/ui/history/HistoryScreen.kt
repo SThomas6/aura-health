@@ -87,6 +87,7 @@ fun HistoryScreen(
 ) {
     val logs by viewModel.logs.collectAsStateWithLifecycle()
     val ui by viewModel.state.collectAsStateWithLifecycle()
+    val conditionGrouping by viewModel.conditionGrouping.collectAsStateWithLifecycle()
     var showSheet by remember { mutableStateOf(false) }
 
     Scaffold(
@@ -167,6 +168,41 @@ fun HistoryScreen(
                     EmptyState(modifier = Modifier.fillMaxSize())
                 }
             } else {
+                // Group logs into a three-tier hierarchy:
+                //   1. Ongoing symptoms (no end time) — top-of-mind so the
+                //      user remembers to mark them ended. Cuts across
+                //      condition groups by design.
+                //   2. Logs grouped under each user-declared health
+                //      condition (e.g. "Type 2 Diabetes"). One section
+                //      per condition that has at least one ended log
+                //      pinned to it.
+                //   3. "Ended symptoms" catch-all for logs without a
+                //      condition link.
+                // Within each section the DAO's COALESCE(end, start)
+                // ordering still applies.
+                val (ongoingLogs, endedLogs) = remember(logs) {
+                    logs.partition { it.endEpochMillis == null }
+                }
+                val groupedEndedLogs = remember(endedLogs, conditionGrouping) {
+                    val byCondition = mutableMapOf<Long, MutableList<SymptomLog>>()
+                    val ungrouped = mutableListOf<SymptomLog>()
+                    endedLogs.forEach { log ->
+                        val c = conditionGrouping.byLogId[log.id]
+                        if (c == null) {
+                            ungrouped += log
+                        } else {
+                            byCondition.getOrPut(c.id) { mutableListOf() } += log
+                        }
+                    }
+                    // Stable ordering by condition list (newest-first via
+                    // the repo's `observeAll` ordering) so the sections
+                    // don't jitter as logs flow in.
+                    val ordered = conditionGrouping.conditions.mapNotNull { c ->
+                        byCondition[c.id]?.let { c to it.toList() }
+                    }
+                    Triple(ordered, ungrouped.toList(), byCondition.size)
+                }
+                val (conditionSections, ungroupedEnded, _) = groupedEndedLogs
                 LazyColumn(
                     modifier = Modifier
                         .fillMaxSize()
@@ -174,8 +210,50 @@ fun HistoryScreen(
                     contentPadding = androidx.compose.foundation.layout.PaddingValues(16.dp),
                     verticalArrangement = Arrangement.spacedBy(12.dp),
                 ) {
-                    items(items = logs, key = { it.id }) { log ->
-                        LogCard(log = log, onClick = { onOpenLog(log.id) })
+                    if (ongoingLogs.isNotEmpty()) {
+                        item(key = "header_ongoing") {
+                            SectionHeader(
+                                title = "Ongoing symptoms",
+                                count = ongoingLogs.size,
+                                tag = "history_section_ongoing",
+                            )
+                        }
+                        items(items = ongoingLogs, key = { "ongoing_${it.id}" }) { log ->
+                            LogCard(log = log, onClick = { onOpenLog(log.id) })
+                        }
+                    }
+                    conditionSections.forEach { (condition, sectionLogs) ->
+                        item(key = "header_cond_${condition.id}") {
+                            SectionHeader(
+                                title = condition.name,
+                                count = sectionLogs.size,
+                                tag = "history_section_condition_${condition.id}",
+                            )
+                        }
+                        items(items = sectionLogs, key = { "cond_${condition.id}_${it.id}" }) { log ->
+                            LogCard(log = log, onClick = { onOpenLog(log.id) })
+                        }
+                    }
+                    if (ungroupedEnded.isNotEmpty()) {
+                        item(key = "header_ended") {
+                            // Title shifts subtly when the user has
+                            // condition groupings: "Other ended symptoms"
+                            // makes more sense than the bare "Ended
+                            // symptoms" header in that context.
+                            val title = if (conditionSections.isEmpty()) {
+                                "Ended symptoms"
+                            } else {
+                                "Other ended symptoms"
+                            }
+                            SectionHeader(
+                                title = title,
+                                count = ungroupedEnded.size,
+                                tag = "history_section_ended",
+                            )
+                        }
+                        items(items = ungroupedEnded, key = { "ended_${it.id}" }) { log ->
+                            LogCard(log = log, onClick = { onOpenLog(log.id) })
+                        }
                     }
                 }
             }
@@ -198,6 +276,52 @@ fun HistoryScreen(
 }
 
 @OptIn(ExperimentalMaterial3Api::class)
+/**
+ * Section header for the Ongoing / Ended split in the history list.
+ *
+ * Lives inline as `item { SectionHeader(...) }` rather than `stickyHeader`
+ * because the user isn't scrolling so far that they'd lose context — and
+ * a sticky version overlapping the back-pressing scrim of the filter
+ * sheet leaks a visual artefact through. A simple item is the right
+ * call.
+ */
+@Composable
+private fun SectionHeader(
+    title: String,
+    count: Int,
+    tag: String,
+) {
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(top = 4.dp, bottom = 4.dp)
+            .testTag(tag),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Text(
+            text = title,
+            style = MaterialTheme.typography.titleSmall,
+            fontWeight = FontWeight.SemiBold,
+            color = MaterialTheme.colorScheme.onSurface,
+        )
+        Spacer(Modifier.width(8.dp))
+        // Count chip so the user instantly sees how many ongoing
+        // symptoms still need stopping.
+        Surface(
+            shape = CircleShape,
+            color = MaterialTheme.colorScheme.secondaryContainer,
+            contentColor = MaterialTheme.colorScheme.onSecondaryContainer,
+        ) {
+            Text(
+                text = count.toString(),
+                style = MaterialTheme.typography.labelSmall,
+                fontWeight = FontWeight.Medium,
+                modifier = Modifier.padding(horizontal = 8.dp, vertical = 2.dp),
+            )
+        }
+    }
+}
+
 @Composable
 private fun SearchBar(
     query: String,

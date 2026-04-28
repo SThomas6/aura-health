@@ -1,6 +1,5 @@
 package com.example.mob_dev_portfolio.ui.theme
 
-import android.os.Build
 import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.darkColorScheme
@@ -93,8 +92,11 @@ fun AuraTheme(
         ThemeMode.Light -> false
         ThemeMode.Dark -> true
     }
+    // Material You dynamic colour requires API 31+ for the dynamic*ColorScheme
+    // helpers. minSdk on this module is 31 so the SDK_INT guard the lint
+    // flagged was dead — `dynamicColor` is the only meaningful gate now.
     val scheme = when {
-        dynamicColor && Build.VERSION.SDK_INT >= Build.VERSION_CODES.S -> {
+        dynamicColor -> {
             val ctx = LocalContext.current
             if (darkTheme) dynamicDarkColorScheme(ctx) else dynamicLightColorScheme(ctx)
         }

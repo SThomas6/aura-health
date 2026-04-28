@@ -522,11 +522,17 @@ private fun RecentLogRow(log: SymptomLog, onClick: () -> Unit) {
     }
 }
 
-private val RELATIVE_FORMATTER: DateTimeFormatter =
+// Builders (not held formatters) so the day-of-week + 24h-clock format
+// follows the user's CURRENT locale at format time. Capturing
+// Locale.getDefault() into a top-level val locks the formatter to the
+// locale at process start — switch device language and the formatter
+// keeps stale day names. Compose recomposes through this on locale
+// change, so cheap per-call construction is the right trade.
+private fun relativeFormatter(): DateTimeFormatter =
     DateTimeFormatter.ofPattern("EEE · HH:mm", Locale.getDefault())
 
 private fun formatWhen(epochMillis: Long): String =
-    Instant.ofEpochMilli(epochMillis).atZone(ZoneId.systemDefault()).format(RELATIVE_FORMATTER)
+    Instant.ofEpochMilli(epochMillis).atZone(ZoneId.systemDefault()).format(relativeFormatter())
 
 @Composable
 private fun TrendChart(

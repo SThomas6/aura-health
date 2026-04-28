@@ -78,7 +78,7 @@ class DoctorVisitEditorViewModel(
      * under normal use — but it means a log inserted in a parallel
      * flow would appear without re-entering the editor.
      */
-    val logsFlow: StateFlow<List<SymptomLog>> = symptomLogRepository
+    private val logsFlow: StateFlow<List<SymptomLog>> = symptomLogRepository
         .observeAll()
         .stateIn(
             scope = viewModelScope,

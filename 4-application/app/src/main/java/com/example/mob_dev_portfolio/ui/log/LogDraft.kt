@@ -53,7 +53,7 @@ object LogValidator {
 
     const val MIN_SEVERITY = 1
     const val MAX_SEVERITY = 10
-    const val MAX_FUTURE_SKEW_MILLIS: Long = 60_000L
+    private const val MAX_FUTURE_SKEW_MILLIS: Long = 60_000L
 
     fun validate(
         draft: LogDraft,

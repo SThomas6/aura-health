@@ -77,7 +77,7 @@ object NextFireCalculator {
     fun maskToLabel(mask: Int): String {
         if (mask == 0) return "Never"
         if (mask == ReminderFrequency.MASK_ALL_DAYS) return "Every day"
-        val labels = DayOfWeek.values().mapNotNull { dow ->
+        val labels = DayOfWeek.entries.mapNotNull { dow ->
             val bit = 1 shl (dow.value - 1)
             if ((mask and bit) != 0) dow.short() else null
         }

@@ -72,6 +72,21 @@ class HealthReportViewModel(
     private val _state = MutableStateFlow<HealthReportState>(HealthReportState.Idle)
     val state: StateFlow<HealthReportState> = _state.asStateFlow()
 
+    /**
+     * User toggle for whether doctor-cleared symptom logs should be
+     * included in the PDF. Default false — the assumption is that a
+     * user sharing a PDF with a doctor doesn't want to flood it with
+     * already-explained noise. Flipped via the "Show all symptoms" UI
+     * affordance and re-read every time [generate] runs (so toggling
+     * forces a regenerate).
+     */
+    private val _includeClearedLogs = MutableStateFlow(false)
+    val includeClearedLogs: StateFlow<Boolean> = _includeClearedLogs.asStateFlow()
+
+    fun setIncludeClearedLogs(include: Boolean) {
+        _includeClearedLogs.value = include
+    }
+
     fun generate() {
         // Guard against double-taps — the UI also hides the button
         // while we're busy, but a hardware-back + re-enter could
@@ -80,7 +95,9 @@ class HealthReportViewModel(
         _state.value = HealthReportState.Generating
         viewModelScope.launch {
             runCatching {
-                val snapshot = repository.loadReportSnapshot()
+                val snapshot = repository.loadReportSnapshot(
+                    includeClearedLogs = _includeClearedLogs.value,
+                )
                 // Both the render (Canvas) and the compression
                 // (GZIPOutputStream) are blocking, so the whole write is
                 // off-main-thread.

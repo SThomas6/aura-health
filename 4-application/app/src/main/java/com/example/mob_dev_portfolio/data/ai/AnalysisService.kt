@@ -42,8 +42,10 @@ open class AnalysisService(
         logs: List<SymptomLog>,
         healthSnapshot: HealthSnapshot = HealthSnapshot.Empty,
         doctorContext: DoctorContextSnapshot = DoctorContextSnapshot.Empty,
+        userConditions: com.example.mob_dev_portfolio.data.condition.UserConditionsSnapshot =
+            com.example.mob_dev_portfolio.data.condition.UserConditionsSnapshot.Empty,
     ): AnalysisResult {
-        val request = buildRequest(profile, userContext, logs, healthSnapshot, doctorContext)
+        val request = buildRequest(profile, userContext, logs, healthSnapshot, doctorContext, userConditions)
         return client.analyze(request)
     }
 
@@ -58,6 +60,8 @@ open class AnalysisService(
         logs: List<SymptomLog>,
         healthSnapshot: HealthSnapshot = HealthSnapshot.Empty,
         doctorContext: DoctorContextSnapshot = DoctorContextSnapshot.Empty,
+        userConditions: com.example.mob_dev_portfolio.data.condition.UserConditionsSnapshot =
+            com.example.mob_dev_portfolio.data.condition.UserConditionsSnapshot.Empty,
     ): AnalysisRequest {
         val now = nowProvider()
         val ageRange = AnalysisSanitizer.ageRange(profile.dateOfBirthEpochMillis, now)
@@ -75,12 +79,19 @@ open class AnalysisService(
                 fullName = profile.fullName,
                 aggregate24h = healthSnapshot.perLogWindows[log.id],
                 diagnosisLabel = doctorContext.diagnosisLabelByLogId[log.id],
+                userConditionLabel = userConditions.conditionLabelByLogId[log.id],
             )
         }
         val knownDiagnoses = buildKnownDiagnoses(
             logsById = logs.associateBy { it.id },
             fullName = profile.fullName,
             doctorContext = doctorContext,
+        )
+        val userDeclaredConditions = buildUserDeclaredConditions(
+            logsById = logs.associateBy { it.id },
+            fullName = profile.fullName,
+            snapshot = userConditions,
+            clearedLogIds = doctorContext.clearedLogIds,
         )
         return AnalysisRequest(
             ageRange = ageRange,
@@ -89,6 +100,7 @@ open class AnalysisService(
             healthSummary = healthSnapshot.asSummaryOrNull(),
             logs = sanitizedLogs,
             knownDiagnoses = knownDiagnoses,
+            userDeclaredConditions = userDeclaredConditions,
         )
     }
 
@@ -96,6 +108,7 @@ open class AnalysisService(
         fullName: String?,
         aggregate24h: HealthWindowAggregate?,
         diagnosisLabel: String?,
+        userConditionLabel: String?,
     ): AnalysisRequest.SanitizedLog =
         AnalysisRequest.SanitizedLog(
             symptomName = AnalysisSanitizer.stripProfileNames(symptomName, fullName),
@@ -112,6 +125,9 @@ open class AnalysisService(
             locationName = locationName,
             healthAggregate24h = aggregate24h?.toLabelMap()?.takeIf { it.isNotEmpty() },
             diagnosisLabel = diagnosisLabel?.let {
+                AnalysisSanitizer.stripProfileNames(it, fullName)
+            },
+            userConditionLabel = userConditionLabel?.let {
                 AnalysisSanitizer.stripProfileNames(it, fullName)
             },
         )
@@ -149,6 +165,42 @@ open class AnalysisService(
                     }
                     .toList()
                 AnalysisRequest.KnownDiagnosis(
+                    label = AnalysisSanitizer.stripProfileNames(rawLabel, fullName),
+                    history = history,
+                )
+            }
+    }
+
+    /**
+     * Mirror of [buildKnownDiagnoses] for user-declared standing
+     * conditions. Sorted alphabetically by label so the prompt order is
+     * deterministic and runs against the same diet of context regardless
+     * of the order the user added them in.
+     */
+    private fun buildUserDeclaredConditions(
+        logsById: Map<Long, SymptomLog>,
+        fullName: String?,
+        snapshot: com.example.mob_dev_portfolio.data.condition.UserConditionsSnapshot,
+        clearedLogIds: Set<Long>,
+    ): List<AnalysisRequest.UserDeclaredCondition> {
+        if (snapshot.conditionLabels.isEmpty()) return emptyList()
+        return snapshot.conditionLabels.entries
+            .sortedBy { it.value.lowercase(Locale.US) }
+            .map { (conditionId, rawLabel) ->
+                val linkedIds = snapshot.linkedLogIdsByCondition[conditionId].orEmpty()
+                val history = linkedIds
+                    .asSequence()
+                    .filterNot { it in clearedLogIds }
+                    .mapNotNull { logsById[it] }
+                    .sortedByDescending { it.startEpochMillis }
+                    .map { log ->
+                        AnalysisRequest.KnownDiagnosis.HistoryEntry(
+                            symptomName = AnalysisSanitizer.stripProfileNames(log.symptomName, fullName),
+                            startIsoDate = ISO_DATE.format(Date(log.startEpochMillis)),
+                        )
+                    }
+                    .toList()
+                AnalysisRequest.UserDeclaredCondition(
                     label = AnalysisSanitizer.stripProfileNames(rawLabel, fullName),
                     history = history,
                 )

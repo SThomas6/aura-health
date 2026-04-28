@@ -42,6 +42,7 @@ import com.example.mob_dev_portfolio.ui.navigation.DetailRoute
 import com.example.mob_dev_portfolio.ui.navigation.DoctorVisitDetailRoute
 import com.example.mob_dev_portfolio.ui.navigation.DoctorVisitEditorRoute
 import com.example.mob_dev_portfolio.ui.navigation.EditLogRoute
+import com.example.mob_dev_portfolio.ui.navigation.HealthConditionsRoute
 import com.example.mob_dev_portfolio.ui.navigation.HealthDataSettingsRoute
 import com.example.mob_dev_portfolio.ui.navigation.HealthMetricDetailRoute
 import com.example.mob_dev_portfolio.ui.navigation.HealthReportHistoryRoute
@@ -205,6 +206,16 @@ fun AuraApp() {
                     },
                     onOpenDemographicProfile = { navController.navigate(DemographicProfileRoute) },
                     onOpenHealthDataSettings = { navController.navigate(HealthDataSettingsRoute) },
+                    onOpenHealthConditions = { navController.navigate(HealthConditionsRoute) },
+                )
+            }
+            composable<HealthConditionsRoute> {
+                com.example.mob_dev_portfolio.ui.condition.HealthConditionsScreen(
+                    onBack = {
+                        if (!navController.popBackStack()) {
+                            navigateToTopLevel(navController, TopLevelRoute.Home)
+                        }
+                    },
                 )
             }
             composable<HealthMetricDetailRoute> { entry ->

@@ -127,10 +127,10 @@ data class OverlayOption(
 }
 
 sealed class OverlayKind {
-    object EnvHumidity : OverlayKind()
-    object EnvTemperature : OverlayKind()
-    object EnvPressure : OverlayKind()
-    object EnvAqi : OverlayKind()
+    data object EnvHumidity : OverlayKind()
+    data object EnvTemperature : OverlayKind()
+    data object EnvPressure : OverlayKind()
+    data object EnvAqi : OverlayKind()
     data class Health(val metric: HealthConnectMetric) : OverlayKind()
 }
 

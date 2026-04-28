@@ -218,6 +218,32 @@ class HttpGeminiClient(
             appendLine("When a recent symptom below is tagged `[known: <label>]` it belongs to one of these diagnoses. Mention it only if there's a notable change (severity spike, new trigger) — otherwise don't re-flag it as a fresh pattern.")
             appendLine()
         }
+        // User-declared standing conditions — chronic / pre-existing
+        // health issues the user told us about during onboarding or
+        // via the Conditions settings screen. Surfaced alongside (but
+        // distinct from) doctor-confirmed diagnoses so the model
+        // doesn't conflate "doctor said you have X at this visit" with
+        // "user told us they have X chronically". Linked symptoms
+        // carry a parallel `[condition: <label>]` tag.
+        if (request.userDeclaredConditions.isNotEmpty()) {
+            appendLine("Standing health conditions the user has told us about (treat as background context, not fresh findings):")
+            request.userDeclaredConditions.forEach { condition ->
+                append("- ")
+                append(condition.label)
+                if (condition.history.isEmpty()) {
+                    appendLine()
+                } else {
+                    append(" — related logs: ")
+                    appendLine(
+                        condition.history.joinToString(", ") { entry ->
+                            "${entry.symptomName} (${entry.startIsoDate})"
+                        },
+                    )
+                }
+            }
+            appendLine("When a recent symptom below is tagged `[condition: <label>]` it belongs to one of these. Same rule as known diagnoses: only flag if something has materially changed.")
+            appendLine()
+        }
         // Explicit signal when the user hasn't shared any Health Connect
         // data, so the model knows not to invent steps/sleep/vitals-based
         // observations. The healthSummary block below replaces this line
@@ -275,6 +301,11 @@ class HttpGeminiClient(
                 }
                 log.diagnosisLabel?.let { label ->
                     append(" | [known: ")
+                    append(label)
+                    append("]")
+                }
+                log.userConditionLabel?.let { label ->
+                    append(" | [condition: ")
                     append(label)
                     append("]")
                 }

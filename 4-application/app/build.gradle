@@ -30,7 +30,7 @@ android {
         versionName = "1.0"
         testInstrumentationRunner "androidx.test.runner.AndroidJUnitRunner"
         vectorDrawables {
-            useSupportLibrary true
+            useSupportLibrary = true
         }
         buildConfigField "String", "GEMINI_API_KEY", "\"${loadGeminiApiKey()}\""
         buildConfigField "String", "GEMINI_MODEL", "\"gemini-3.1-flash-lite-preview\""
@@ -40,6 +40,45 @@ android {
         release {
             minifyEnabled false
             proguardFiles getDefaultProguardFile('proguard-android-optimize.txt'), 'proguard-rules.pro'
+            signingConfig = signingConfigs.debug
+        }
+    }
+
+    // Two product flavors split the testing build from delivery.
+    //
+    //   demo       — the "testing" profile. Installs alongside production
+    //                (`.demo` applicationId suffix), seeds ~20 demo symptom
+    //                logs on first launch and auto-seeds two weeks of Health
+    //                Connect sample data on Connect. This is the variant the
+    //                portfolio video records against and the default Android
+    //                Studio variant for new clones.
+    //   production — clean install: no seed data on the database, no
+    //                auto-seed on Health Connect grant. Real device data
+    //                only. This is what a real user would install.
+    //
+    // The flavor is named `demo` (not `testing`) because Gradle reserves
+    // any flavor name starting with `test` for the JUnit/instrumentation
+    // source-set hierarchy — declaring `testing` here makes the build
+    // configuration phase fail with "ProductFlavor names cannot start with
+    // 'test'". `demo` is the canonical alternative used in Google's own
+    // sample projects.
+    //
+    // The split is enforced via a single BuildConfig flag (SEED_SAMPLE_DATA)
+    // that the seeders read at runtime. Keeps the call sites in `main/` —
+    // there's no source duplication across flavors.
+    flavorDimensions += "environment"
+    productFlavors {
+        demo {
+            dimension "environment"
+            applicationIdSuffix ".demo"
+            versionNameSuffix "-demo"
+            buildConfigField "boolean", "SEED_SAMPLE_DATA", "true"
+            resValue "string", "app_name", "Aura Health (Demo)"
+        }
+        production {
+            dimension "environment"
+            buildConfigField "boolean", "SEED_SAMPLE_DATA", "false"
+            resValue "string", "app_name", "Aura Health"
         }
     }
     compileOptions {

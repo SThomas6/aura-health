@@ -25,8 +25,12 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
+import androidx.compose.foundation.layout.ExperimentalLayoutApi
+import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.material.icons.filled.Check
+import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.Favorite
+import androidx.compose.material.icons.filled.HealthAndSafety
 import androidx.compose.material.icons.filled.LocationOn
 import androidx.compose.material.icons.filled.Notifications
 import androidx.compose.material.icons.filled.WavingHand
@@ -35,7 +39,10 @@ import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.Icon
+import androidx.compose.material3.IconButton
+import androidx.compose.material3.InputChip
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
@@ -236,6 +243,7 @@ fun OnboardingScreen(
                     onRequest = { healthConnectLauncher.launch(healthConnectPermissions) },
                     testTag = "onboarding_health_connect",
                 )
+                4 -> HealthConditionsStepCard()
                 else -> ReadyCard()
             }
 
@@ -286,7 +294,7 @@ fun OnboardingScreen(
 }
 
 /** 5 steps: welcome, notifications, location, health connect, ready. */
-private fun totalSteps(): Int = 5
+private fun totalSteps(): Int = 6
 
 @Composable
 private fun StepIndicator(current: Int, total: Int) {
@@ -427,6 +435,118 @@ private fun PermissionCard(
                         .testTag("${testTag}_allow"),
                 ) {
                     Text("Allow", fontWeight = FontWeight.SemiBold)
+                }
+            }
+        }
+    }
+}
+
+/**
+ * Onboarding step that lets the user record any chronic / pre-existing
+ * health conditions (e.g. "Type 2 Diabetes", "Asthma"). Goes straight
+ * into the [com.example.mob_dev_portfolio.data.condition.HealthConditionRepository]
+ * so the AI's already-explained context bundle picks it up from the
+ * very first analysis run.
+ *
+ * Inline editor (no nav round-trip) so a user mid-onboarding doesn't
+ * lose the step indicator or get bumped back into a sub-flow. Skipping
+ * is a no-op — the bottom-bar Next button advances regardless.
+ */
+@OptIn(ExperimentalLayoutApi::class)
+@Composable
+private fun HealthConditionsStepCard() {
+    val context = LocalContext.current
+    val repository = remember {
+        (context.applicationContext as AuraApplication).container.healthConditionRepository
+    }
+    val conditions by repository.observeAll().collectAsStateWithLifecycle(initialValue = emptyList())
+    val scope = rememberCoroutineScope()
+    var draft by rememberSaveable { mutableStateOf("") }
+
+    Card(
+        shape = MaterialTheme.shapes.extraLarge,
+        modifier = Modifier
+            .fillMaxWidth()
+            .testTag("onboarding_conditions"),
+    ) {
+        Column(
+            modifier = Modifier.padding(24.dp),
+            verticalArrangement = Arrangement.spacedBy(12.dp),
+        ) {
+            Box(
+                modifier = Modifier
+                    .size(52.dp)
+                    .clip(CircleShape)
+                    .background(MaterialTheme.colorScheme.primaryContainer),
+                contentAlignment = Alignment.Center,
+            ) {
+                Icon(
+                    Icons.Filled.HealthAndSafety,
+                    contentDescription = null,
+                    tint = MaterialTheme.colorScheme.onPrimaryContainer,
+                    modifier = Modifier.size(28.dp),
+                )
+            }
+            Text(
+                "Any pre-existing conditions?",
+                style = MaterialTheme.typography.headlineSmall,
+                fontWeight = FontWeight.Bold,
+            )
+            Text(
+                "Tell Aura about any chronic or already-diagnosed health " +
+                    "issues — diabetes, asthma, migraine disorders, etc. The AI " +
+                    "uses these as background context, and you'll be able to " +
+                    "group your symptom logs under each one. Skip if you'd " +
+                    "rather add them later from Settings.",
+                style = MaterialTheme.typography.bodyMedium,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                OutlinedTextField(
+                    value = draft,
+                    onValueChange = { draft = it },
+                    placeholder = { Text("e.g. Type 2 Diabetes") },
+                    singleLine = true,
+                    modifier = Modifier
+                        .weight(1f)
+                        .testTag("onboarding_conditions_input"),
+                )
+                Spacer(Modifier.size(8.dp))
+                Button(
+                    onClick = {
+                        val name = draft.trim()
+                        if (name.isNotBlank()) {
+                            scope.launch { repository.upsert(name = name) }
+                            draft = ""
+                        }
+                    },
+                    enabled = draft.isNotBlank(),
+                    modifier = Modifier.testTag("onboarding_conditions_add"),
+                ) { Text("Add") }
+            }
+            if (conditions.isNotEmpty()) {
+                FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    conditions.forEach { c ->
+                        InputChip(
+                            selected = false,
+                            onClick = {},
+                            label = { Text(c.name) },
+                            trailingIcon = {
+                                IconButton(
+                                    onClick = { scope.launch { repository.delete(c.id) } },
+                                    modifier = Modifier
+                                        .size(24.dp)
+                                        .testTag("onboarding_conditions_remove_${c.id}"),
+                                ) {
+                                    Icon(
+                                        Icons.Filled.Close,
+                                        contentDescription = "Remove",
+                                        modifier = Modifier.size(16.dp),
+                                    )
+                                }
+                            },
+                        )
+                    }
                 }
             }
         }

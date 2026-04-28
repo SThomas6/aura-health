@@ -4,7 +4,6 @@ import android.app.AlarmManager
 import android.app.PendingIntent
 import android.content.Context
 import android.content.Intent
-import android.os.Build
 import android.util.Log
 import com.example.mob_dev_portfolio.data.medication.MedicationReminder
 import com.example.mob_dev_portfolio.data.medication.NextFireCalculator
@@ -39,7 +38,7 @@ open class MedicationReminderScheduler(
 ) {
 
     private val alarmManager: AlarmManager =
-        context.getSystemService(Context.ALARM_SERVICE) as AlarmManager
+        context.getSystemService(AlarmManager::class.java)
 
     /**
      * Schedule (or reschedule) the next fire for [reminder]. Cancels
@@ -93,15 +92,17 @@ open class MedicationReminderScheduler(
         val pi = buildFirePendingIntent(reminderId, flags = PendingIntent.FLAG_UPDATE_CURRENT)
             ?: return
         try {
-            // canScheduleExactAlarms is API 31+. On API < 31 exact is
-            // always available. Fall back to setAndAllowWhileIdle if
-            // the user has revoked the SCHEDULE_EXACT_ALARM grant; the
-            // 60-second SLA (NFR-MR-01) can still usually be met under
-            // Doze for inexact alarms, and degrading is preferable to
-            // a SecurityException that drops the reminder entirely.
-            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S &&
-                !alarmManager.canScheduleExactAlarms()
-            ) {
+            // canScheduleExactAlarms() is the API 31+ runtime check for
+            // the user-revocable SCHEDULE_EXACT_ALARM grant. minSdk on
+            // this module is 31, so we can call it unconditionally —
+            // the SDK_INT guard the lint flagged was dead code.
+            //
+            // Fall back to setAndAllowWhileIdle if the user has revoked
+            // the grant; the 60-second SLA (NFR-MR-01) can still
+            // usually be met under Doze for inexact alarms, and
+            // degrading is preferable to a SecurityException that
+            // drops the reminder entirely.
+            if (!alarmManager.canScheduleExactAlarms()) {
                 alarmManager.setAndAllowWhileIdle(AlarmManager.RTC_WAKEUP, triggerAtMillis, pi)
             } else {
                 alarmManager.setExactAndAllowWhileIdle(AlarmManager.RTC_WAKEUP, triggerAtMillis, pi)

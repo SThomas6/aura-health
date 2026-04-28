@@ -57,7 +57,12 @@ import java.time.ZoneId
 import java.time.format.DateTimeFormatter
 import java.util.Locale
 
-private val HistoryDateFormat: DateTimeFormatter =
+// Built per-call rather than held in a top-level val so the day/month
+// names follow the user's CURRENT locale at format time. Capturing
+// Locale.getDefault() into a top-level val locks the formatter to the
+// locale at process start — switch device language and the historic
+// rows keep stale day-of-week names until next cold start.
+private fun historyDateFormat(): DateTimeFormatter =
     DateTimeFormatter.ofPattern("EEE d MMM yyyy · HH:mm", Locale.getDefault())
 
 /**
@@ -214,7 +219,7 @@ private fun ReportHistoryRow(
                 .atZone(ZoneId.systemDefault())
                 .toLocalDateTime()
             Text(
-                generated.format(HistoryDateFormat),
+                generated.format(historyDateFormat()),
                 style = MaterialTheme.typography.titleSmall,
                 fontWeight = FontWeight.SemiBold,
                 fontFamily = AuraMonoFamily,

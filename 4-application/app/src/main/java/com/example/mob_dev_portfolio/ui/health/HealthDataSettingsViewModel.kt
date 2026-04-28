@@ -5,6 +5,7 @@ import androidx.lifecycle.ViewModelProvider
 import androidx.lifecycle.viewModelScope
 import androidx.lifecycle.viewmodel.CreationExtras
 import com.example.mob_dev_portfolio.AuraApplication
+import com.example.mob_dev_portfolio.BuildConfig
 import com.example.mob_dev_portfolio.data.health.HealthConnectMetric
 import com.example.mob_dev_portfolio.data.health.HealthConnectService
 import com.example.mob_dev_portfolio.data.health.HealthMetricCategory
@@ -181,8 +182,13 @@ class HealthDataSettingsViewModel(
      * Silent on both success and failure — the dashboard is the
      * user-visible affordance. Logcat shows the counts (see
      * [HealthSampleSeeder.TAG]) when debugging.
+     *
+     * Production builds short-circuit before the seeder runs so a real
+     * user's Health Connect store is never written to. Only the testing
+     * flavor seeds — gated by [BuildConfig.SEED_SAMPLE_DATA].
      */
     private suspend fun maybeAutoSeed() {
+        if (!BuildConfig.SEED_SAMPLE_DATA) return
         val result = runCatching { sampleSeeder.seedTwoWeeks() }.getOrNull() ?: return
         if (result.ok) {
             preferencesRepository.setSampleSeeded(true)
@@ -195,14 +201,22 @@ class HealthDataSettingsViewModel(
 
     /**
      * Permission set to request when the user taps "grant". Covers read
-     * for every catalogue metric plus the write permissions the
-     * auto-seeder needs — requesting them together means the user sees
-     * a single system dialog rather than two back-to-back, and the
-     * seeder can run silently once grants land.
+     * for every catalogue metric plus, on the testing flavor only, the
+     * write permissions the auto-seeder needs — requesting them together
+     * means the user sees a single system dialog rather than two
+     * back-to-back, and the seeder can run silently once grants land.
+     *
+     * Production builds never seed, so they don't ask for write grants —
+     * a real user's HC permission sheet stays read-only.
      */
-    fun allCatalogPermissions(): Set<String> =
-        HealthConnectMetric.entries.map { it.readPermission }.toSet() +
-            sampleSeeder.writePermissions()
+    fun allCatalogPermissions(): Set<String> {
+        val readPerms = HealthConnectMetric.entries.map { it.readPermission }.toSet()
+        return if (BuildConfig.SEED_SAMPLE_DATA) {
+            readPerms + sampleSeeder.writePermissions()
+        } else {
+            readPerms
+        }
+    }
 
     /**
      * Helper to group the metric rows by category for the settings UI.

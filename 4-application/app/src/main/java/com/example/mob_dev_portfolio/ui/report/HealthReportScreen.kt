@@ -22,6 +22,7 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.automirrored.filled.NoteAdd
+import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.Description
 import androidx.compose.material.icons.filled.History
 import androidx.compose.material.icons.filled.Share
@@ -41,6 +42,9 @@ import androidx.compose.material3.TopAppBar
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -49,6 +53,8 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.window.Dialog
+import androidx.compose.ui.window.DialogProperties
 import androidx.core.content.FileProvider
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewmodel.compose.viewModel
@@ -61,7 +67,11 @@ import java.time.ZoneId
 import java.time.format.DateTimeFormatter
 import java.util.Locale
 
-private val GeneratedAtFormat: DateTimeFormatter =
+// Built per-call rather than held in a top-level val so the day/month
+// names follow the user's CURRENT locale at format time. Capturing
+// Locale.getDefault() into a top-level val locks the formatter to the
+// locale at process start.
+private fun generatedAtFormat(): DateTimeFormatter =
     DateTimeFormatter.ofPattern("EEE d MMM yyyy · HH:mm", Locale.getDefault())
 
 /**
@@ -90,6 +100,7 @@ fun HealthReportScreen(
     viewModel: HealthReportViewModel = viewModel(factory = HealthReportViewModel.Factory),
 ) {
     val state by viewModel.state.collectAsStateWithLifecycle()
+    val includeClearedLogs by viewModel.includeClearedLogs.collectAsStateWithLifecycle()
     val context = LocalContext.current
 
     // When the screen goes away, wipe the transient preview PDF so that
@@ -140,6 +151,8 @@ fun HealthReportScreen(
                     .fillMaxSize(),
                 onGenerate = viewModel::generate,
                 onOpenHistory = onOpenHistory,
+                includeClearedLogs = includeClearedLogs,
+                onIncludeClearedLogsChange = viewModel::setIncludeClearedLogs,
             )
             HealthReportState.Generating -> GeneratingContent(
                 modifier = Modifier
@@ -154,6 +167,8 @@ fun HealthReportScreen(
                 onShare = { sharePdf(context, current) },
                 onRegenerate = viewModel::generate,
                 onOpenHistory = onOpenHistory,
+                includeClearedLogs = includeClearedLogs,
+                onIncludeClearedLogsChange = viewModel::setIncludeClearedLogs,
             )
             is HealthReportState.Error -> ErrorContent(
                 message = current.message,
@@ -171,6 +186,8 @@ private fun IdleContent(
     modifier: Modifier = Modifier,
     onGenerate: () -> Unit,
     onOpenHistory: () -> Unit,
+    includeClearedLogs: Boolean,
+    onIncludeClearedLogsChange: (Boolean) -> Unit,
 ) {
     Column(
         modifier = modifier
@@ -196,6 +213,10 @@ private fun IdleContent(
             body = "Preview inside Aura, then share the PDF from the action bar. Works completely offline.",
         )
         Spacer(Modifier.size(4.dp))
+        ClearedLogsToggleCard(
+            include = includeClearedLogs,
+            onChange = onIncludeClearedLogsChange,
+        )
         Button(
             onClick = onGenerate,
             modifier = Modifier
@@ -221,6 +242,67 @@ private fun IdleContent(
             Icon(Icons.Filled.History, contentDescription = null)
             Spacer(Modifier.size(8.dp))
             Text("View past reports")
+        }
+    }
+}
+
+/**
+ * "Show all symptoms (incl. cleared)" toggle card.
+ *
+ * Renders a Material `Switch` with explanatory copy. The default state is
+ * **off** — when sharing the PDF with a doctor, an already-cleared
+ * symptom is noise the doctor already explained, and including it tends
+ * to bury the things they actually need to see. The user can opt in
+ * when they want a complete archival record (e.g. for a *new* doctor
+ * who hasn't seen the prior visit notes).
+ *
+ * On the Ready screen we also surface how many logs are currently hidden
+ * so the user has a concrete cue that something's been filtered out.
+ */
+@Composable
+private fun ClearedLogsToggleCard(
+    include: Boolean,
+    onChange: (Boolean) -> Unit,
+    hiddenCount: Int = -1,
+) {
+    Card(
+        modifier = Modifier
+            .fillMaxWidth()
+            .testTag("report_cleared_toggle"),
+        colors = CardDefaults.cardColors(
+            containerColor = MaterialTheme.colorScheme.surfaceContainerLow,
+        ),
+    ) {
+        Row(
+            modifier = Modifier.padding(horizontal = 16.dp, vertical = 12.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Column(modifier = Modifier.weight(1f)) {
+                Text(
+                    text = "Include doctor-cleared symptoms",
+                    style = MaterialTheme.typography.titleSmall,
+                    fontWeight = FontWeight.SemiBold,
+                )
+                val supporting = when {
+                    include -> "All symptom logs will appear in the PDF, " +
+                        "including the ones a doctor has marked as reviewed."
+                    hiddenCount > 0 -> "Off by default. $hiddenCount log" +
+                        (if (hiddenCount == 1) "" else "s") +
+                        " marked cleared by a doctor visit will be omitted."
+                    else -> "Off by default. Cleared logs are kept out of the report."
+                }
+                Text(
+                    text = supporting,
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
+            Spacer(Modifier.size(12.dp))
+            androidx.compose.material3.Switch(
+                checked = include,
+                onCheckedChange = onChange,
+                modifier = Modifier.testTag("report_cleared_toggle_switch"),
+            )
         }
     }
 }
@@ -327,7 +409,15 @@ private fun ReadyContent(
     onShare: () -> Unit,
     onRegenerate: () -> Unit,
     onOpenHistory: () -> Unit,
+    includeClearedLogs: Boolean,
+    onIncludeClearedLogsChange: (Boolean) -> Unit,
 ) {
+    // Drives the full-screen preview dialog. Local to ReadyContent (not
+    // hoisted to the ViewModel) because it's pure UI state — survives
+    // configuration change via rememberSaveable would be nice but the
+    // user's intent on rotate is ambiguous, so we let it dismiss.
+    var fullscreenOpen by remember { mutableStateOf(false) }
+
     Column(
         modifier = modifier.testTag("report_ready"),
     ) {
@@ -340,6 +430,13 @@ private fun ReadyContent(
             verticalArrangement = Arrangement.spacedBy(12.dp),
         ) {
             SummaryCard(snapshot = ready.snapshot)
+            // The toggle lives on this screen too so the user can flip
+            // the option and Regenerate without going back to Idle.
+            ClearedLogsToggleCard(
+                include = includeClearedLogs,
+                onChange = onIncludeClearedLogsChange,
+                hiddenCount = ready.snapshot.hiddenClearedCount,
+            )
             // Quick jump to the history of previous reports. Keeping it
             // as an OutlinedButton here (rather than only in the top-bar
             // icon) so users who haven't noticed the header affordance
@@ -360,6 +457,8 @@ private fun ReadyContent(
             file = ready.file,
             modifier = Modifier.weight(1f),
             horizontalPadding = 20.dp,
+            // Tap any page → full-screen viewer.
+            onPageClick = { fullscreenOpen = true },
         )
         // Bottom action bar — share is primary, regenerate is secondary
         // (you might want fresh numbers after logging another symptom).
@@ -390,6 +489,74 @@ private fun ReadyContent(
                 Spacer(Modifier.size(8.dp))
                 Text("Share PDF", fontWeight = FontWeight.SemiBold)
             }
+        }
+    }
+
+    if (fullscreenOpen) {
+        FullScreenPdfDialog(
+            file = ready.file,
+            onDismiss = { fullscreenOpen = false },
+        )
+    }
+}
+
+/**
+ * Full-screen PDF viewer. Hosts the same [PdfPreview] composable inside
+ * a Material 3 [Scaffold] so the close button gets the correct system-bar
+ * insets and the user has a clear exit affordance even on devices with
+ * gesture nav.
+ *
+ * Implemented as a [Dialog] (with `usePlatformDefaultWidth = false`)
+ * rather than a separate nav destination because the preview's lifecycle
+ * is tightly bound to the parent Ready state — leaving the report screen
+ * deletes the temp preview file, which would race with a Nav-stack push.
+ */
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+private fun FullScreenPdfDialog(
+    file: File,
+    onDismiss: () -> Unit,
+) {
+    Dialog(
+        onDismissRequest = onDismiss,
+        properties = DialogProperties(
+            usePlatformDefaultWidth = false,
+            // Allow the system back gesture / Esc key to dismiss.
+            dismissOnBackPress = true,
+            dismissOnClickOutside = false,
+        ),
+    ) {
+        Scaffold(
+            modifier = Modifier
+                .fillMaxSize()
+                .testTag("report_pdf_fullscreen"),
+            topBar = {
+                TopAppBar(
+                    title = { Text("Report preview") },
+                    navigationIcon = {
+                        IconButton(
+                            onClick = onDismiss,
+                            modifier = Modifier.testTag("report_pdf_fullscreen_close"),
+                        ) {
+                            Icon(
+                                Icons.Filled.Close,
+                                contentDescription = "Close fullscreen",
+                            )
+                        }
+                    },
+                )
+            },
+        ) { padding ->
+            // onPageClick = null disables tap-to-fullscreen here — we're
+            // already in the fullscreen view, no second nesting.
+            PdfPreview(
+                file = file,
+                modifier = Modifier
+                    .fillMaxSize()
+                    .padding(padding),
+                horizontalPadding = 12.dp,
+                onPageClick = null,
+            )
         }
     }
 }
@@ -438,7 +605,7 @@ private fun SummaryCard(snapshot: ReportSnapshot) {
                 .atZone(ZoneId.systemDefault())
                 .toLocalDateTime()
             Text(
-                "Generated ${generated.format(GeneratedAtFormat)}",
+                "Generated ${generated.format(generatedAtFormat())}",
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
                 fontFamily = AuraMonoFamily,

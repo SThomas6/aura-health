@@ -164,9 +164,13 @@ private class FakeRepository(initial: List<SymptomLog>) : SymptomLogRepository(H
         }
 }
 
+// Mirror of the DAO's `ORDER BY COALESCE(endEpochMillis, startEpochMillis)`
+// clause. Date sorts key off the *end* timestamp so the History screen's
+// "newest = most recently ended" semantic holds; ongoing logs (no end
+// time) fall back to their start timestamp.
 private fun HistorySort.comparator(): Comparator<SymptomLog> = when (this) {
-    HistorySort.DateDesc -> compareByDescending { it.startEpochMillis }
-    HistorySort.DateAsc -> compareBy { it.startEpochMillis }
+    HistorySort.DateDesc -> compareByDescending { it.endEpochMillis ?: it.startEpochMillis }
+    HistorySort.DateAsc -> compareBy { it.endEpochMillis ?: it.startEpochMillis }
     HistorySort.SeverityDesc -> compareByDescending { it.severity }
     HistorySort.SeverityAsc -> compareBy { it.severity }
     HistorySort.NameAsc -> compareBy { it.symptomName.lowercase() }

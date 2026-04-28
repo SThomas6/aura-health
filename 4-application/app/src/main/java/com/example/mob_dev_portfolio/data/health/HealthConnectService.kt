@@ -223,7 +223,8 @@ open class HealthConnectService(
         // the underlying record list is empty.
         val steps: Long? = if (HealthConnectMetric.Steps in readable) {
             runCatching {
-                val records = client.readRecords(ReadRecordsRequest(StepsRecord::class, range)).records
+                val records = client.readRecords(ReadRecordsRequest(StepsRecord::class, range))
+                    .records.excludingDemoSeedInProduction()
                 if (records.isEmpty()) null else records.sumOf { it.count }
             }.getOrNull()
         } else null
@@ -232,7 +233,7 @@ open class HealthConnectService(
             runCatching {
                 val records = client.readRecords(
                     ReadRecordsRequest(RestingHeartRateRecord::class, range),
-                ).records
+                ).records.excludingDemoSeedInProduction()
                 if (records.isEmpty()) null else records.sumOf { it.beatsPerMinute }.toDouble() / records.size
             }.getOrNull()
         } else null
@@ -241,7 +242,8 @@ open class HealthConnectService(
             runCatching {
                 val samples = client.readRecords(
                     ReadRecordsRequest(HeartRateRecord::class, range),
-                ).records.flatMap { record -> record.samples.map { it.beatsPerMinute } }
+                ).records.excludingDemoSeedInProduction()
+                    .flatMap { record -> record.samples.map { it.beatsPerMinute } }
                 HeartRateSummary(
                     avg = if (samples.isEmpty()) null else samples.sum().toDouble() / samples.size,
                     min = samples.minOrNull(),
@@ -252,7 +254,8 @@ open class HealthConnectService(
 
         val sleepMinutes: Long? = if (HealthConnectMetric.SleepSession in readable) {
             runCatching {
-                val records = client.readRecords(ReadRecordsRequest(SleepSessionRecord::class, range)).records
+                val records = client.readRecords(ReadRecordsRequest(SleepSessionRecord::class, range))
+                    .records.excludingDemoSeedInProduction()
                 if (records.isEmpty()) null
                 else records.sumOf { Duration.between(it.startTime, it.endTime).toMinutes() }
             }.getOrNull()
@@ -262,7 +265,7 @@ open class HealthConnectService(
             runCatching {
                 val records = client.readRecords(
                     ReadRecordsRequest(OxygenSaturationRecord::class, range),
-                ).records
+                ).records.excludingDemoSeedInProduction()
                 if (records.isEmpty()) null else records.sumOf { it.percentage.value } / records.size
             }.getOrNull()
         } else null
@@ -271,7 +274,7 @@ open class HealthConnectService(
             runCatching {
                 val records = client.readRecords(
                     ReadRecordsRequest(RespiratoryRateRecord::class, range),
-                ).records
+                ).records.excludingDemoSeedInProduction()
                 if (records.isEmpty()) null else records.sumOf { it.rate } / records.size
             }.getOrNull()
         } else null
@@ -280,7 +283,7 @@ open class HealthConnectService(
             runCatching {
                 val records = client.readRecords(
                     ReadRecordsRequest(ActiveCaloriesBurnedRecord::class, range),
-                ).records
+                ).records.excludingDemoSeedInProduction()
                 if (records.isEmpty()) null else records.sumOf { it.energy.inKilocalories }
             }.getOrNull()
         } else null
@@ -289,7 +292,7 @@ open class HealthConnectService(
             runCatching {
                 val size = client.readRecords(
                     ReadRecordsRequest(ExerciseSessionRecord::class, range),
-                ).records.size
+                ).records.excludingDemoSeedInProduction().size
                 if (size == 0) null else size
             }.getOrNull()
         } else null
@@ -321,7 +324,7 @@ open class HealthConnectService(
                     HeightRecord::class,
                     TimeRangeFilter.between(now.minus(Duration.ofDays(365)), now),
                 ),
-            ).records.maxByOrNull { it.time }?.height?.inMeters
+            ).records.excludingDemoSeedInProduction().maxByOrNull { it.time }?.height?.inMeters
         }.getOrNull()
 
     private suspend fun latestWeightKg(client: HealthConnectClient, now: Instant): Double? =
@@ -331,7 +334,7 @@ open class HealthConnectService(
                     WeightRecord::class,
                     TimeRangeFilter.between(now.minus(Duration.ofDays(365)), now),
                 ),
-            ).records.maxByOrNull { it.time }?.weight?.inKilograms
+            ).records.excludingDemoSeedInProduction().maxByOrNull { it.time }?.weight?.inKilograms
         }.getOrNull()
 
     private suspend fun latestBodyFatPercent(client: HealthConnectClient, now: Instant): Double? =
@@ -341,7 +344,7 @@ open class HealthConnectService(
                     BodyFatRecord::class,
                     TimeRangeFilter.between(now.minus(Duration.ofDays(365)), now),
                 ),
-            ).records.maxByOrNull { it.time }?.percentage?.value
+            ).records.excludingDemoSeedInProduction().maxByOrNull { it.time }?.percentage?.value
         }.getOrNull()
 
     private data class HeartRateSummary(

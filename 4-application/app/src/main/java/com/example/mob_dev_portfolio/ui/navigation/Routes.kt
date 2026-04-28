@@ -121,6 +121,15 @@ data object DemographicProfileRoute
 data object SettingsRoute
 
 /**
+ * Route for the user-declared health conditions screen. Lists conditions
+ * (e.g. "Type 2 Diabetes"), lets the user add/edit/delete, and feeds the
+ * AI's already-explained context bundle. Reachable from Settings and
+ * from the onboarding flow.
+ */
+@Serializable
+data object HealthConditionsRoute
+
+/**
  * Route for the fullscreen Health Connect metric detail screen. The
  * [metricStorageKey] is the stable
  * [com.example.mob_dev_portfolio.data.health.HealthConnectMetric.storageKey]

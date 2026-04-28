@@ -190,30 +190,48 @@ GEMINI_API_KEY=your_gemini_api_key_here
 
 > **Note**: `local.properties` is in `.gitignore` — the key never hits source control. The build tolerates a missing key; the AI screen will surface a `"Gemini key not configured"` error at runtime rather than fail the build. Every other feature of the app works without a key.
 
-### Step 3 — Build and install
+### Step 3 — Pick a build variant
 
-From Android Studio: pick a device or emulator and press **Run**.
+The app ships with two product flavors (declared in `app/build.gradle`):
 
-From the CLI:
+| Flavor | Application id | Launcher label | Behaviour |
+| --- | --- | --- | --- |
+| **`demo`** *(default)* | `com.example.mob_dev_portfolio.demo` | "Aura Health (Demo)" | Seeds ~20 demo symptom logs on first launch. Auto-seeds two weeks of Health Connect sample data on Connect. Used for the demo video and screenshots. |
+| **`production`** | `com.example.mob_dev_portfolio` | "Aura Health" | Clean install — no seed data, no auto-seed on Connect. The app shows real device data only. This is what a real user would install. |
+
+The split is enforced by a single `BuildConfig.SEED_SAMPLE_DATA` boolean read at runtime by `AuraApplication` (symptom-log seeder) and `HealthDataSettingsViewModel` (Health Connect auto-seed). Source code is shared — there's no duplication across flavors.
+
+The two flavors install side-by-side because they use different application ids — useful for comparing seeded vs clean behaviour on the same emulator.
+
+In **Android Studio**, the Build Variants tool window (View → Tool Windows → Build Variants) lets you switch between `demoDebug`, `productionDebug`, `demoRelease`, and `productionRelease`. Pick a device/emulator and press **Run**.
+
+### Step 4 — Build and install (CLI)
 
 ```bash
-./gradlew assembleDebug              # build the debug APK
-./gradlew installDebug               # install on the connected device
-./gradlew :app:connectedDebugAndroidTest   # run instrumentation tests
-./gradlew :app:testDebugUnitTest     # run unit tests
+# Demo flavor (seeded — recommended for first run / video demo)
+./gradlew :app:assembleDemoDebug
+./gradlew :app:installDemoDebug
+
+# Production flavor (clean install — real-user behaviour)
+./gradlew :app:assembleProductionDebug
+./gradlew :app:installProductionDebug
+
+# Tests (run on the demo flavor by default)
+./gradlew :app:testDemoDebugUnitTest
+./gradlew :app:connectedDemoDebugAndroidTest
 ```
 
-### Step 4 — First launch
+### Step 5 — First launch
 
 On cold-start the app will:
 1. Show a short onboarding flow (name + DOB)
 2. Offer to connect Health Connect (optional — skip if you don't have it)
-3. Seed ~20 demo symptom logs so the UI isn't empty
+3. *(Demo flavor only)* Seed ~20 demo symptom logs so the UI isn't empty
 4. Land on the Home dashboard
 
-Open **Settings → Health data** and tap **Seed sample data** to populate 10–14 days of demo wearable metrics for the charts to render. (If Health Connect isn't installed this button is hidden.)
+On the demo flavor, opening **Settings → Health data** and granting permissions will silently seed two weeks of plausible wearable metrics so the dashboard charts have data. The production flavor never writes to Health Connect.
 
-### Step 5 — Generate an AI analysis
+### Step 6 — Generate an AI analysis
 
 1. Go to the **Analysis** tab
 2. (First time only) grant the notification permission when prompted

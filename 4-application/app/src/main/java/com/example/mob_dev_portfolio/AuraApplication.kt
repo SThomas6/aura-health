@@ -58,13 +58,28 @@ class AuraApplication : Application() {
         // on every cold start is the right thing.
         container.analysisScheduler.scheduleWeekly()
 
-        // Fire the first-launch symptom seeder on a background scope so
-        // a cold start doesn't stall on the database + flow read.
-        // [SymptomLogSeeder.seedIfEmpty] is a no-op when any log
-        // already exists, so this is safe to run on every cold start.
-        startupScope.launch {
-            runCatching { container.symptomLogSeeder.seedIfEmpty() }
-                .onFailure { Log.w("AuraApplication", "Symptom seed failed", it) }
+        // Fire the first-launch demo seeders on a background scope so
+        // a cold start doesn't stall on the database + flow read. Both
+        // are no-ops when their respective tables already have rows, so
+        // this is safe to run on every cold start.
+        //
+        // Only the `demo` product flavor seeds — production builds get a
+        // clean database so first-run UX matches what a real user would
+        // experience. The flag is set via BuildConfig from the flavor
+        // block in app/build.gradle.
+        //
+        // Order matters: the doctor seeder links visits to symptom logs
+        // by id, so the symptom seed has to land first. We run them
+        // sequentially in a single coroutine rather than two parallel
+        // launches to avoid the doctor seeder racing the symptom seed
+        // and bailing out as "no logs yet".
+        if (BuildConfig.SEED_SAMPLE_DATA) {
+            startupScope.launch {
+                runCatching { container.symptomLogSeeder.seedIfEmpty() }
+                    .onFailure { Log.w("AuraApplication", "Symptom seed failed", it) }
+                runCatching { container.doctorVisitSeeder.seedIfEmpty() }
+                    .onFailure { Log.w("AuraApplication", "Doctor visit seed failed", it) }
+            }
         }
 
         // Re-arm medication reminders on cold start. The boot receiver

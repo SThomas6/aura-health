@@ -421,10 +421,13 @@ class HealthSampleSeeder(
 
         /**
          * Stable prefix for every seeded record's `clientRecordId`. Used
-         * for idempotent upsert — if we ever need a migration, bump this
-         * to `aura-seed-v2-` and the next seed run produces a clean set.
+         * for idempotent upsert — if we ever need a migration, bump
+         * [SEED_CLIENT_ID_PREFIX] in `HealthSeedFilter.kt` and the next
+         * seed run produces a clean set. Single source of truth lives in
+         * the filter file because the read-side filter has to recognise
+         * exactly what the write-side wrote.
          */
-        private const val CLIENT_ID_PREFIX = "aura-seed-v1"
+        private const val CLIENT_ID_PREFIX = SEED_CLIENT_ID_PREFIX
         private const val CLIENT_ID_STEPS = "steps"
         private const val CLIENT_ID_RESTING_HR = "resting-hr"
         private const val CLIENT_ID_HEART_RATE = "heart-rate"

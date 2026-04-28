@@ -264,7 +264,7 @@ private fun FrequencySection(
                 fontWeight = FontWeight.SemiBold,
             )
             Spacer(Modifier.height(8.dp))
-            val kinds = FrequencyKind.values()
+            val kinds = FrequencyKind.entries
             SingleChoiceSegmentedButtonRow(Modifier.fillMaxWidth()) {
                 kinds.forEachIndexed { index, kind ->
                     SegmentedButton(

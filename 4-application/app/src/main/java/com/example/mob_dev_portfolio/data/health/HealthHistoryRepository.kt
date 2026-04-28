@@ -167,7 +167,8 @@ class HealthHistoryRepository(
         start: Instant,
         now: Instant,
     ): Series {
-        val records = client.readRecords(ReadRecordsRequest(StepsRecord::class, filter)).records
+        val records = client.readRecords(ReadRecordsRequest(StepsRecord::class, filter))
+            .records.excludingDemoSeedInProduction()
         val points = bucketSum(records, range, start, now) { it.startTime to it.count.toDouble() }
         val total = records.sumOf { it.count.toDouble() }.takeIf { it > 0 }
         return Series(
@@ -191,7 +192,8 @@ class HealthHistoryRepository(
         start: Instant,
         now: Instant,
     ): Series {
-        val records = client.readRecords(ReadRecordsRequest(ActiveCaloriesBurnedRecord::class, filter)).records
+        val records = client.readRecords(ReadRecordsRequest(ActiveCaloriesBurnedRecord::class, filter))
+            .records.excludingDemoSeedInProduction()
         val points = bucketSum(records, range, start, now) { it.startTime to it.energy.inKilocalories }
         val total = records.sumOf { it.energy.inKilocalories }.takeIf { it > 0 }
         return Series(
@@ -215,7 +217,8 @@ class HealthHistoryRepository(
         start: Instant,
         now: Instant,
     ): Series {
-        val records = client.readRecords(ReadRecordsRequest(ExerciseSessionRecord::class, filter)).records
+        val records = client.readRecords(ReadRecordsRequest(ExerciseSessionRecord::class, filter))
+            .records.excludingDemoSeedInProduction()
         val points = bucketCount(records, range, start, now) { it.startTime }
         return Series(
             metric = HealthConnectMetric.ExerciseSession,
@@ -238,7 +241,8 @@ class HealthHistoryRepository(
         start: Instant,
         now: Instant,
     ): Series {
-        val samples = client.readRecords(ReadRecordsRequest(HeartRateRecord::class, filter)).records
+        val samples = client.readRecords(ReadRecordsRequest(HeartRateRecord::class, filter))
+            .records.excludingDemoSeedInProduction()
             .flatMap { r -> r.samples.map { s -> s.time to s.beatsPerMinute.toDouble() } }
         val points = bucketAvg(samples, range, start, now)
         val all = samples.map { it.second }
@@ -263,7 +267,8 @@ class HealthHistoryRepository(
         start: Instant,
         now: Instant,
     ): Series {
-        val records = client.readRecords(ReadRecordsRequest(RestingHeartRateRecord::class, filter)).records
+        val records = client.readRecords(ReadRecordsRequest(RestingHeartRateRecord::class, filter))
+            .records.excludingDemoSeedInProduction()
         val tuples = records.map { it.time to it.beatsPerMinute.toDouble() }
         val points = bucketAvg(tuples, range, start, now)
         val values = records.map { it.beatsPerMinute.toDouble() }
@@ -288,7 +293,8 @@ class HealthHistoryRepository(
         start: Instant,
         now: Instant,
     ): Series {
-        val records = client.readRecords(ReadRecordsRequest(OxygenSaturationRecord::class, filter)).records
+        val records = client.readRecords(ReadRecordsRequest(OxygenSaturationRecord::class, filter))
+            .records.excludingDemoSeedInProduction()
         val tuples = records.map { it.time to it.percentage.value }
         val points = bucketAvg(tuples, range, start, now)
         val values = records.map { it.percentage.value }
@@ -313,7 +319,8 @@ class HealthHistoryRepository(
         start: Instant,
         now: Instant,
     ): Series {
-        val records = client.readRecords(ReadRecordsRequest(RespiratoryRateRecord::class, filter)).records
+        val records = client.readRecords(ReadRecordsRequest(RespiratoryRateRecord::class, filter))
+            .records.excludingDemoSeedInProduction()
         val tuples = records.map { it.time to it.rate }
         val points = bucketAvg(tuples, range, start, now)
         val values = records.map { it.rate }
@@ -338,7 +345,8 @@ class HealthHistoryRepository(
         start: Instant,
         now: Instant,
     ): Series {
-        val records = client.readRecords(ReadRecordsRequest(SleepSessionRecord::class, filter)).records
+        val records = client.readRecords(ReadRecordsRequest(SleepSessionRecord::class, filter))
+            .records.excludingDemoSeedInProduction()
         // Sleep is anchored to the wake-up day so bars line up with the
         // day the user woke up on rather than the day they went to bed.
         val tuples = records.map { it.endTime to Duration.between(it.startTime, it.endTime).toMinutes().toDouble() }
@@ -366,7 +374,8 @@ class HealthHistoryRepository(
         start: Instant,
         now: Instant,
     ): Series {
-        val records = client.readRecords(ReadRecordsRequest(WeightRecord::class, filter)).records
+        val records = client.readRecords(ReadRecordsRequest(WeightRecord::class, filter))
+            .records.excludingDemoSeedInProduction()
         val tuples = records.map { it.time to it.weight.inKilograms }
         val points = bucketAvg(tuples, range, start, now)
         val values = records.map { it.weight.inKilograms }
@@ -391,7 +400,8 @@ class HealthHistoryRepository(
         start: Instant,
         now: Instant,
     ): Series {
-        val records = client.readRecords(ReadRecordsRequest(HeightRecord::class, filter)).records
+        val records = client.readRecords(ReadRecordsRequest(HeightRecord::class, filter))
+            .records.excludingDemoSeedInProduction()
         val tuples = records.map { it.time to it.height.inMeters }
         val points = bucketAvg(tuples, range, start, now)
         val values = records.map { it.height.inMeters }
@@ -416,7 +426,8 @@ class HealthHistoryRepository(
         start: Instant,
         now: Instant,
     ): Series {
-        val records = client.readRecords(ReadRecordsRequest(BodyFatRecord::class, filter)).records
+        val records = client.readRecords(ReadRecordsRequest(BodyFatRecord::class, filter))
+            .records.excludingDemoSeedInProduction()
         val tuples = records.map { it.time to it.percentage.value }
         val points = bucketAvg(tuples, range, start, now)
         val values = records.map { it.percentage.value }

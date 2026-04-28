@@ -6,6 +6,7 @@ import com.example.mob_dev_portfolio.data.ai.AnalysisGuidance
 import com.example.mob_dev_portfolio.data.ai.AnalysisRun
 import com.example.mob_dev_portfolio.data.ai.AnalysisRunDao
 import com.example.mob_dev_portfolio.data.ai.AnalysisRunEntity
+import com.example.mob_dev_portfolio.data.doctor.DoctorVisitRepository
 import com.example.mob_dev_portfolio.data.photo.SymptomPhotoRepository
 
 /**
@@ -41,6 +42,13 @@ open class ReportRepository(
      * production the AppContainer always supplies the real one.
      */
     private val photoRepository: SymptomPhotoRepository? = null,
+    /**
+     * Optional doctor-visit repo, used to pull the set of "cleared" log
+     * ids so [loadReportSnapshot] can hide them from the PDF by default.
+     * Nullable so the existing test doubles still construct without
+     * having to spin up the doctor data layer.
+     */
+    private val doctorVisitRepository: DoctorVisitRepository? = null,
 ) {
 
     /**
@@ -50,21 +58,40 @@ open class ReportRepository(
      * and expects a single consistent document, not a live-updating
      * one. If a new log lands mid-generation it'll be in the *next*
      * report, not this one.
+     *
+     * @param includeClearedLogs When false (the default), any log
+     *   marked "cleared" by a doctor visit is dropped from the
+     *   chronological logs section. The aggregate counters
+     *   ([ReportSnapshot.totalLogCount], [ReportSnapshot.averageSeverity])
+     *   still reflect the full table because they're documented as
+     *   "everything ever logged" — hiding cleared items from those
+     *   would silently understate the user's history. The PDF screen
+     *   surfaces this as a "Show all symptoms (incl. cleared)" toggle.
      */
     open suspend fun loadReportSnapshot(
         generatedAtEpochMillis: Long = System.currentTimeMillis(),
+        includeClearedLogs: Boolean = false,
     ): ReportSnapshot {
         val rawLogs = symptomLogDao.listChronologicalAsc()
-        val logs = rawLogs.map { entity ->
-            val photos = photoRepository?.let { repo ->
-                // Pull the row list first, then decrypt each into bytes.
-                // Corrupt / missing files drop silently — the PDF still
-                // renders without a phantom placeholder.
-                repo.listForLog(entity.id)
-                    .mapNotNull { repo.readBytes(it) }
-            }.orEmpty()
-            entity.toReportLog(photos)
+        val clearedIds: Set<Long> = if (includeClearedLogs) {
+            emptySet()
+        } else {
+            runCatching { doctorVisitRepository?.snapshotForAnalysis()?.clearedLogIds }
+                .getOrNull()
+                .orEmpty()
         }
+        val logs = rawLogs
+            .filterNot { it.id in clearedIds }
+            .map { entity ->
+                val photos = photoRepository?.let { repo ->
+                    // Pull the row list first, then decrypt each into bytes.
+                    // Corrupt / missing files drop silently — the PDF still
+                    // renders without a phantom placeholder.
+                    repo.listForLog(entity.id)
+                        .mapNotNull { repo.readBytes(it) }
+                }.orEmpty()
+                entity.toReportLog(photos)
+            }
         val analyses = analysisRunDao.listChronologicalAsc().map { it.toReportAnalysis() }
         val total = symptomLogDao.totalCount()
         val average = symptomLogDao.averageSeverity()
@@ -74,6 +101,10 @@ open class ReportRepository(
             analyses = analyses,
             totalLogCount = total,
             averageSeverity = average,
+            includesClearedLogs = includeClearedLogs,
+            hiddenClearedCount = if (includeClearedLogs) 0 else clearedIds.count { id ->
+                rawLogs.any { it.id == id }
+            },
         )
     }
 }
@@ -97,6 +128,19 @@ data class ReportSnapshot(
      * logs table is empty — SQLite returns NULL on AVG of zero rows.
      */
     val averageSeverity: Double?,
+    /**
+     * True when the snapshot was generated with cleared logs included.
+     * The PDF generator uses this to render an explanatory note at the
+     * top of the chronological logs section so a doctor reading the
+     * printout knows whether they're looking at the curated or full
+     * timeline.
+     */
+    val includesClearedLogs: Boolean = true,
+    /**
+     * Number of cleared logs that were dropped from [logs]. Zero when
+     * [includesClearedLogs] is true.
+     */
+    val hiddenClearedCount: Int = 0,
 ) {
     val hasContent: Boolean get() = logs.isNotEmpty() || analyses.isNotEmpty()
 }
