@@ -1,12 +1,29 @@
 package com.example.mob_dev_portfolio.data
 
+import com.example.mob_dev_portfolio.data.photo.SymptomPhotoRepository
 import com.example.mob_dev_portfolio.ui.history.HistoryFilter
 import com.example.mob_dev_portfolio.ui.history.HistorySort
 import com.example.mob_dev_portfolio.ui.log.LogValidator
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.map
 
-open class SymptomLogRepository(private val dao: SymptomLogDao) {
+open class SymptomLogRepository(
+    private val dao: SymptomLogDao,
+    /**
+     * Optional sibling repository for photo attachments. Injected
+     * (rather than newed-up here) so tests can exercise the log
+     * repository in isolation, and nullable so older test doubles
+     * that don't care about photos keep compiling. Production
+     * construction in [com.example.mob_dev_portfolio.DefaultAppContainer]
+     * always supplies a real instance.
+     *
+     * When non-null, [delete] cascades through this repository
+     * first so the encrypted photo files on disk disappear before
+     * the FK cascade drops the DB rows — NFR-PA-05 "photos must
+     * be deleted when the parent log is removed".
+     */
+    private val photoRepository: SymptomPhotoRepository? = null,
+) {
 
     open fun observeAll(): Flow<List<SymptomLog>> =
         dao.observeAll().map { list -> list.map { it.toDomain() } }
@@ -39,7 +56,15 @@ open class SymptomLogRepository(private val dao: SymptomLogDao) {
 
     open suspend fun update(log: SymptomLog): Int = dao.update(log.toEntity())
 
-    open suspend fun delete(id: Long) = dao.delete(id)
+    open suspend fun delete(id: Long) {
+        // Photo files first: once the row is gone the FK cascade drops
+        // the photo rows and we lose the handles we'd need to find the
+        // files on disk. The photo-repo's own `deleteForLog` walks the
+        // rows and unlinks each file before dropping the rows itself,
+        // so the order here keeps the file-system and the DB in sync.
+        photoRepository?.deleteForLog(id)
+        dao.delete(id)
+    }
 }
 
 private val HistorySort.daoKey: String

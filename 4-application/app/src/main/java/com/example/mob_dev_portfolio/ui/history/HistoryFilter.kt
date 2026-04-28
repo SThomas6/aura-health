@@ -11,8 +11,15 @@ enum class HistorySort {
 
     val label: String
         get() = when (this) {
-            DateDesc -> "Newest first"
-            DateAsc -> "Oldest first"
+            // "Newest" / "Oldest" semantics are based on END date so that
+            // a symptom that started weeks ago but only finished today
+            // ranks ahead of one that started yesterday and ended last
+            // night. Ongoing logs (no end date) fall back to their start
+            // time and are surfaced in their own section by the History
+            // screen, so within "Ended symptoms" the order here is the
+            // one that drives the visual.
+            DateDesc -> "Newest first (most recently ended)"
+            DateAsc -> "Oldest first (least recently ended)"
             SeverityDesc -> "Severity high to low"
             SeverityAsc -> "Severity low to high"
             NameAsc -> "Symptom A–Z"

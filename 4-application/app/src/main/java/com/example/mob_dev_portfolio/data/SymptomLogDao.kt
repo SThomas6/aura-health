@@ -32,12 +32,19 @@ interface SymptomLogDao {
           AND (:startAfter IS NULL OR startEpochMillis >= :startAfter)
           AND (:startBefore IS NULL OR startEpochMillis <= :startBefore)
         ORDER BY
-            CASE WHEN :sortKey = 'DATE_ASC' THEN startEpochMillis END ASC,
+            -- Date sorts use the *end* time so "newest" means
+            -- "most recently ended", and ongoing logs (NULL endEpochMillis)
+            -- fall back to startEpochMillis. The History screen partitions
+            -- the result into Ongoing / Ended sections, so within-section
+            -- ordering is what this clause controls.
+            CASE WHEN :sortKey = 'DATE_ASC'
+                THEN COALESCE(endEpochMillis, startEpochMillis) END ASC,
             CASE WHEN :sortKey = 'SEVERITY_DESC' THEN severity END DESC,
             CASE WHEN :sortKey = 'SEVERITY_ASC' THEN severity END ASC,
             CASE WHEN :sortKey = 'NAME_ASC' THEN LOWER(symptomName) END ASC,
-            CASE WHEN :sortKey = 'DATE_DESC' THEN startEpochMillis END DESC,
-            startEpochMillis DESC
+            CASE WHEN :sortKey = 'DATE_DESC'
+                THEN COALESCE(endEpochMillis, startEpochMillis) END DESC,
+            COALESCE(endEpochMillis, startEpochMillis) DESC
         """,
     )
     fun observeFiltered(

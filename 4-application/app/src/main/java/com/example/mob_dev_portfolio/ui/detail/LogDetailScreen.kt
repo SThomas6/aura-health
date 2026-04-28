@@ -1,6 +1,7 @@
 package com.example.mob_dev_portfolio.ui.detail
 
 import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -13,6 +14,7 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.sizeIn
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.rememberScrollState
@@ -23,16 +25,17 @@ import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
+import androidx.compose.material.icons.filled.CheckCircle
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.Edit
+import androidx.compose.material.icons.filled.MedicalServices
+import androidx.compose.material.icons.filled.Stop
 import androidx.compose.material3.AlertDialog
-import androidx.compose.material3.AssistChip
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
-import androidx.compose.material3.Card
-import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material3.FilledTonalButton
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
@@ -55,9 +58,15 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.platform.LocalContext
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewmodel.compose.viewModel
+import com.example.mob_dev_portfolio.AuraApplication
 import com.example.mob_dev_portfolio.data.SymptomLog
+import com.example.mob_dev_portfolio.data.doctor.LogDoctorAnnotation
+import com.example.mob_dev_portfolio.data.photo.SymptomPhoto
+import com.example.mob_dev_portfolio.data.photo.SymptomPhotoRepository
+import com.example.mob_dev_portfolio.ui.log.PhotoAttachmentsGallery
 import com.example.mob_dev_portfolio.ui.theme.AuraInk
 import com.example.mob_dev_portfolio.ui.theme.AuraMonoFamily
 import com.example.mob_dev_portfolio.ui.theme.severityColor
@@ -75,11 +84,18 @@ fun LogDetailScreen(
     onBack: () -> Unit,
     onEdit: (Long) -> Unit,
     onDeleted: () -> Unit,
+    onOpenVisit: (Long) -> Unit = {},
     viewModel: LogDetailViewModel = viewModel(factory = LogDetailViewModel.factory(id)),
 ) {
     val log by viewModel.log.collectAsStateWithLifecycle()
     val ui by viewModel.state.collectAsStateWithLifecycle()
+    val photos by viewModel.photos.collectAsStateWithLifecycle()
+    val doctorAnnotation by viewModel.doctorAnnotation.collectAsStateWithLifecycle()
     val snackbarHost = remember { SnackbarHostState() }
+    val context = LocalContext.current
+    val photoRepository = remember {
+        (context.applicationContext as AuraApplication).container.symptomPhotoRepository
+    }
 
     LaunchedEffect(ui.deleted) {
         if (ui.deleted) onDeleted()
@@ -97,6 +113,22 @@ fun LogDetailScreen(
             } else {
                 viewModel.dismissDeleteError()
             }
+        }
+    }
+
+    // "End now" undo flow. The ViewModel emits a one-shot signal carrying
+    // the prior end time so the snackbar can offer a perfect restore.
+    LaunchedEffect(ui.justEnded) {
+        val signal = ui.justEnded ?: return@LaunchedEffect
+        val result = snackbarHost.showSnackbar(
+            message = "Symptom ended",
+            actionLabel = "Undo",
+            duration = SnackbarDuration.Short,
+        )
+        if (result == SnackbarResult.ActionPerformed) {
+            viewModel.undoEnd(signal)
+        } else {
+            viewModel.consumeJustEnded()
         }
     }
 
@@ -130,9 +162,14 @@ fun LogDetailScreen(
                 }
             is DetailLogState.Loaded -> DetailContent(
                 log = current.log,
+                photos = photos,
+                photoRepository = photoRepository,
+                doctorAnnotation = doctorAnnotation,
                 isDeleting = ui.isDeleting,
                 onEdit = { onEdit(id) },
                 onDelete = viewModel::requestDelete,
+                onEndNow = viewModel::endNow,
+                onOpenVisit = onOpenVisit,
                 modifier = Modifier.padding(padding),
             )
         }
@@ -162,6 +199,64 @@ fun LogDetailScreen(
             },
             modifier = Modifier.testTag("dialog_delete_confirm"),
         )
+    }
+}
+
+/**
+ * Quick-action card shown only on ongoing symptom logs (no end time).
+ *
+ * Reasons for the dedicated affordance:
+ *  - Live symptoms are how the data set goes stale — the user logs a
+ *    headache, gets distracted, never returns to mark it ended, and
+ *    the timeline turns into an unbounded "headache for 14 days" record.
+ *  - The full editor takes ~6 taps to set an end time. This is one tap.
+ *  - Undo is offered via snackbar so a fat-finger doesn't lose the
+ *    "still happening" state.
+ *
+ * If the user wants a *specific* past end time (rather than "now"),
+ * the Edit affordance below is still the right path.
+ */
+@Composable
+private fun OngoingEndNowCard(onEndNow: () -> Unit) {
+    Surface(
+        color = MaterialTheme.colorScheme.tertiaryContainer,
+        contentColor = MaterialTheme.colorScheme.onTertiaryContainer,
+        shape = RoundedCornerShape(16.dp),
+        modifier = Modifier
+            .fillMaxWidth()
+            .testTag("detail_end_now_card"),
+    ) {
+        Row(
+            modifier = Modifier.padding(horizontal = 16.dp, vertical = 12.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Column(modifier = Modifier.weight(1f)) {
+                Text(
+                    text = "This symptom is still ongoing",
+                    style = MaterialTheme.typography.titleSmall,
+                    fontWeight = FontWeight.SemiBold,
+                )
+                Text(
+                    text = "Mark it ended now or pick a custom time via Edit.",
+                    style = MaterialTheme.typography.bodySmall,
+                )
+            }
+            Spacer(Modifier.width(12.dp))
+            FilledTonalButton(
+                onClick = onEndNow,
+                modifier = Modifier
+                    .heightIn(min = 44.dp)
+                    .testTag("detail_end_now_button"),
+            ) {
+                Icon(
+                    imageVector = Icons.Filled.Stop,
+                    contentDescription = null,
+                    modifier = Modifier.size(18.dp),
+                )
+                Spacer(Modifier.width(6.dp))
+                Text("End now")
+            }
+        }
     }
 }
 
@@ -203,9 +298,14 @@ private fun NotFoundState(onBack: () -> Unit, modifier: Modifier = Modifier) {
 @Composable
 private fun DetailContent(
     log: SymptomLog,
+    photos: List<SymptomPhoto>,
+    photoRepository: SymptomPhotoRepository,
+    doctorAnnotation: LogDoctorAnnotation?,
     isDeleting: Boolean,
     onEdit: () -> Unit,
     onDelete: () -> Unit,
+    onEndNow: () -> Unit,
+    onOpenVisit: (Long) -> Unit,
     modifier: Modifier = Modifier,
 ) {
     val zone = ZoneId.systemDefault()
@@ -220,6 +320,21 @@ private fun DetailContent(
             .testTag("detail_content"),
         verticalArrangement = Arrangement.spacedBy(16.dp),
     ) {
+        doctorAnnotation?.let { annotation ->
+            DoctorAnnotationBadge(
+                annotation = annotation,
+                onClick = { onOpenVisit(annotation.visit.id) },
+            )
+        }
+
+        // Ongoing-symptom shortcut: one tap stamps `endEpochMillis = now`
+        // without sending the user through the full editor. Hidden when
+        // the log already has an end time. Undo is available on the
+        // snackbar fired immediately afterwards.
+        if (log.endEpochMillis == null) {
+            OngoingEndNowCard(onEndNow = onEndNow)
+        }
+
         SeverityHeroCard(
             symptomName = log.symptomName,
             severity = log.severity,
@@ -271,6 +386,17 @@ private fun DetailContent(
                 label = "Approximate location",
                 value = log.locationName?.takeIf { it.isNotBlank() } ?: "Location unavailable",
                 testTag = "detail_location",
+            )
+        }
+
+        // FR-PA-04 — photo gallery. Read-only strip with fullscreen on
+        // tap; add/remove lives on the edit screen. Only renders when
+        // there's at least one photo, so logs without attachments look
+        // exactly as before.
+        if (photos.isNotEmpty()) {
+            PhotoAttachmentsGallery(
+                photos = photos,
+                photoRepository = photoRepository,
             )
         }
 
@@ -463,6 +589,69 @@ private fun formatDuration(startMillis: Long, endMillis: Long?): String? {
         else -> "${minutes}m"
     }
 }
+
+/**
+ * Tap-through badge shown above the hero when this log has been
+ * cleared by a doctor visit or linked to one of its diagnoses. Tapping
+ * it opens the source visit so the user can see why the AI treats the
+ * log differently.
+ */
+@Composable
+private fun DoctorAnnotationBadge(
+    annotation: LogDoctorAnnotation,
+    onClick: () -> Unit,
+) {
+    val (icon, headline, subtext, tag) = when (annotation) {
+        is LogDoctorAnnotation.Cleared -> BadgeContent(
+            icon = Icons.Filled.CheckCircle,
+            headline = "Reviewed & cleared",
+            subtext = "The AI ignores this log in future analyses.",
+            tag = "detail_annotation_cleared",
+        )
+        is LogDoctorAnnotation.LinkedToDiagnosis -> BadgeContent(
+            icon = Icons.Filled.MedicalServices,
+            headline = "Linked to: ${annotation.diagnosis.label.ifBlank { "(unlabelled issue)" }}",
+            subtext = "The AI treats this as already-explained context.",
+            tag = "detail_annotation_linked",
+        )
+    }
+    Surface(
+        color = MaterialTheme.colorScheme.secondaryContainer,
+        contentColor = MaterialTheme.colorScheme.onSecondaryContainer,
+        shape = RoundedCornerShape(16.dp),
+        modifier = Modifier
+            .fillMaxWidth()
+            .clip(RoundedCornerShape(16.dp))
+            .clickable(onClick = onClick)
+            .testTag(tag),
+    ) {
+        Row(
+            modifier = Modifier.padding(horizontal = 16.dp, vertical = 12.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Icon(icon, contentDescription = null)
+            Spacer(Modifier.width(12.dp))
+            Column(modifier = Modifier.weight(1f)) {
+                Text(
+                    headline,
+                    style = MaterialTheme.typography.titleSmall,
+                    fontWeight = FontWeight.SemiBold,
+                )
+                Text(
+                    subtext,
+                    style = MaterialTheme.typography.bodySmall,
+                )
+            }
+        }
+    }
+}
+
+private data class BadgeContent(
+    val icon: androidx.compose.ui.graphics.vector.ImageVector,
+    val headline: String,
+    val subtext: String,
+    val tag: String,
+)
 
 @Composable
 private fun DetailRow(label: String, value: String, testTag: String) {

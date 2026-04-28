@@ -6,8 +6,10 @@ import androidx.datastore.core.DataStore
 import androidx.datastore.preferences.core.Preferences
 import androidx.datastore.preferences.preferencesDataStore
 import com.example.mob_dev_portfolio.data.AuraDatabase
-import com.example.mob_dev_portfolio.data.SymptomLogEntity
 import com.example.mob_dev_portfolio.data.SymptomLogRepository
+import com.example.mob_dev_portfolio.data.SymptomLogSeeder
+import com.example.mob_dev_portfolio.data.doctor.DoctorVisitRepository
+import com.example.mob_dev_portfolio.data.doctor.DoctorVisitSeeder
 import androidx.work.WorkManager
 import com.example.mob_dev_portfolio.data.ai.AnalysisHistoryRepository
 import com.example.mob_dev_portfolio.data.ai.AnalysisResultStore
@@ -20,12 +22,23 @@ import com.example.mob_dev_portfolio.notifications.AnalysisNotifier
 import com.example.mob_dev_portfolio.ui.DeepLinkEvents
 import com.example.mob_dev_portfolio.work.AnalysisScheduler
 import com.example.mob_dev_portfolio.work.WorkManagerAnalysisScheduler
+import com.example.mob_dev_portfolio.data.environment.EnvironmentalHistoryRepository
+import com.example.mob_dev_portfolio.data.environment.EnvironmentalHistoryService
 import com.example.mob_dev_portfolio.data.environment.EnvironmentalService
+import com.example.mob_dev_portfolio.data.environment.OpenMeteoEnvironmentalHistoryService
 import com.example.mob_dev_portfolio.data.environment.OpenMeteoEnvironmentalService
+import com.example.mob_dev_portfolio.data.health.HealthConnectService
+import com.example.mob_dev_portfolio.data.health.HealthHistoryRepository
+import com.example.mob_dev_portfolio.data.health.HealthPreferencesRepository
+import com.example.mob_dev_portfolio.data.health.HealthSampleSeeder
 import com.example.mob_dev_portfolio.data.location.AndroidGeocoder
 import com.example.mob_dev_portfolio.data.location.FusedLocationProvider
 import com.example.mob_dev_portfolio.data.location.LocationProvider
 import com.example.mob_dev_portfolio.data.location.ReverseGeocoder
+import com.example.mob_dev_portfolio.data.medication.MedicationRepository
+import com.example.mob_dev_portfolio.data.photo.SymptomPhotoRepository
+import com.example.mob_dev_portfolio.notifications.MedicationReminderNotifier
+import com.example.mob_dev_portfolio.reminders.MedicationReminderScheduler
 import com.example.mob_dev_portfolio.data.preferences.UiPreferencesRepository
 import com.example.mob_dev_portfolio.data.preferences.UserProfileRepository
 import com.example.mob_dev_portfolio.data.report.HealthReportPdfGenerator
@@ -41,6 +54,7 @@ import java.io.IOException
 private val Context.uiPreferencesStore: DataStore<Preferences> by preferencesDataStore(name = "aura_ui_prefs")
 private val Context.userProfileStore: DataStore<Preferences> by preferencesDataStore(name = "aura_user_profile")
 private val Context.analysisResultStoreDs: DataStore<Preferences> by preferencesDataStore(name = "aura_analysis_result")
+private val Context.healthPreferencesStore: DataStore<Preferences> by preferencesDataStore(name = "aura_health_prefs")
 
 interface AppContainer {
     val symptomLogRepository: SymptomLogRepository
@@ -48,6 +62,16 @@ interface AppContainer {
     val locationProvider: LocationProvider
     val reverseGeocoder: ReverseGeocoder
     val environmentalService: EnvironmentalService
+
+    /**
+     * Historical weather + AQI fetcher for the Trends overlay lines.
+     * Distinct from [environmentalService] (which takes one sample at
+     * save-time) — this one returns full time-series over a window.
+     */
+    val environmentalHistoryService: EnvironmentalHistoryService
+
+    /** Caching / location-resolving wrapper around [environmentalHistoryService]. */
+    val environmentalHistoryRepository: EnvironmentalHistoryRepository
     val userProfileRepository: UserProfileRepository
     val geminiClient: GeminiClient
     val analysisService: AnalysisService
@@ -83,6 +107,15 @@ interface AppContainer {
     val deepLinkEvents: DeepLinkEvents
 
     /**
+     * Session-lived biometric-lock gate. See
+     * [com.example.mob_dev_portfolio.security.AppLockController] — kept
+     * in the container (not in MainActivity) so the Settings screen can
+     * flip it directly when the user enables the lock while already
+     * inside the app.
+     */
+    val appLockController: com.example.mob_dev_portfolio.security.AppLockController
+
+    /**
      * Offline health-report generator. Aggregates symptom logs + AI
      * analysis history into a structured PDF using Android's native
      * [android.graphics.pdf.PdfDocument] — no network, no third-party
@@ -94,11 +127,108 @@ interface AppContainer {
     val healthReportPdfGenerator: HealthReportPdfGenerator
 
     /**
+     * Reads Health Connect records into an in-memory [com.example.mob_dev_portfolio.data.health.HealthSnapshot].
+     * The only component that talks to the HC provider directly —
+     * view-models request grants via the SDK's permission contract but
+     * all record reads flow through here so the per-metric fallback
+     * logic stays in one place.
+     */
+    val healthConnectService: HealthConnectService
+
+    /**
+     * Persists the user's per-metric opt-in toggles + the master
+     * "integration active" flag. Stored in its own DataStore file so
+     * the settings screen renders without unlocking the encrypted
+     * Room database.
+     */
+    val healthPreferencesRepository: HealthPreferencesRepository
+
+    /**
+     * Time-series reader over Health Connect for the Home dashboard +
+     * fullscreen detail screens. Separate from [healthConnectService]
+     * because those path build aggregates for the AI prompt; this path
+     * returns raw per-day (or per-hour) buckets for graphing.
+     */
+    val healthHistoryRepository: HealthHistoryRepository
+
+    /**
+     * Developer-only seeder used by the "Seed sample data" button on the
+     * Health Data Settings screen. Writes ~14 days of plausible records
+     * so the Home graphs have data to render without the user owning a
+     * wearable.
+     */
+    val healthSampleSeeder: HealthSampleSeeder
+
+    /**
      * Room-backed index of every generated PDF report, paired with
      * the compressed files on disk. Backs the history screen and
      * drives the two-step (file-first, row-second) delete contract.
      */
     val reportArchiveRepository: ReportArchiveRepository
+
+    /**
+     * Idempotent "first-launch" seeder that inserts ~20 demo symptom
+     * logs if (and only if) the log table is empty. Exists so the
+     * graphs, history filters, and AI-analysis prompt all have data
+     * to render on a brand-new install without the user having to
+     * backfill an hour of manual entry first. Returning users with
+     * real logs are never touched — the seeder short-circuits on any
+     * non-zero row count.
+     */
+    val symptomLogSeeder: SymptomLogSeeder
+
+    /**
+     * Companion seeder that adds a couple of plausible doctor visits
+     * (with linked diagnoses and a cleared log) once the symptom seed
+     * has landed. Exists so the Doctor Visits tab, the AI pipeline's
+     * doctor-context branch, and the per-log "linked to diagnosis"
+     * badge on the symptom detail screen all have something to render
+     * on a fresh install of the demo flavor.
+     */
+    val doctorVisitSeeder: DoctorVisitSeeder
+
+    /**
+     * Room-backed store of medication reminders + their append-only dose
+     * history. Writes from the editor UI and the [MedicationReminderReceiver];
+     * reads drive the list/history screens and the Home preview card.
+     */
+    val medicationRepository: MedicationRepository
+
+    /**
+     * AlarmManager wrapper that arms/cancels the next fire of each
+     * reminder. Kept in the container so both the boot receiver and
+     * the editor ViewModel dial the same instance.
+     */
+    val medicationReminderScheduler: MedicationReminderScheduler
+
+    /** Channel + notification builder for medication-reminder fires. */
+    val medicationReminderNotifier: MedicationReminderNotifier
+
+    /**
+     * Photo attachments for symptom logs. Owns the compress →
+     * EXIF-strip → encrypt → store pipeline. Wired alongside the log
+     * repository so the editor and detail screens can add, list,
+     * and remove photos without going through a sub-viewmodel.
+     */
+    val symptomPhotoRepository: SymptomPhotoRepository
+
+    /**
+     * Doctor visits + their cleared/diagnosed symptom joins. Feeds
+     * both the Doctor Visits top-level screen and the AI pipeline —
+     * cleared logs are excluded from the Gemini prompt, and
+     * diagnosis-linked logs are annotated with the diagnosis label
+     * so the model treats them as known context.
+     */
+    val doctorVisitRepository: DoctorVisitRepository
+
+    /**
+     * Backs the user-declared health-condition feature: standalone
+     * conditions like "Type 2 Diabetes" the user adds during onboarding
+     * or via the Conditions settings screen, plus the join with symptom
+     * logs so History can group them and the AI gets them as
+     * already-explained context.
+     */
+    val healthConditionRepository: com.example.mob_dev_portfolio.data.condition.HealthConditionRepository
 }
 
 class DefaultAppContainer(
@@ -147,7 +277,10 @@ class DefaultAppContainer(
         AuraDatabase.get(appContext, passphrase)
 
     override val symptomLogRepository: SymptomLogRepository by lazy {
-        SymptomLogRepository(database.symptomLogDao())
+        SymptomLogRepository(
+            dao = database.symptomLogDao(),
+            photoRepository = symptomPhotoRepository,
+        )
     }
 
     override val uiPreferencesRepository: UiPreferencesRepository by lazy {
@@ -164,6 +297,17 @@ class DefaultAppContainer(
 
     override val environmentalService: EnvironmentalService by lazy {
         OpenMeteoEnvironmentalService()
+    }
+
+    override val environmentalHistoryService: EnvironmentalHistoryService by lazy {
+        OpenMeteoEnvironmentalHistoryService()
+    }
+
+    override val environmentalHistoryRepository: EnvironmentalHistoryRepository by lazy {
+        EnvironmentalHistoryRepository(
+            service = environmentalHistoryService,
+            symptomLogRepository = symptomLogRepository,
+        )
     }
 
     override val userProfileRepository: UserProfileRepository by lazy {
@@ -212,10 +356,16 @@ class DefaultAppContainer(
 
     override val deepLinkEvents: DeepLinkEvents by lazy { DeepLinkEvents() }
 
+    override val appLockController: com.example.mob_dev_portfolio.security.AppLockController by lazy {
+        com.example.mob_dev_portfolio.security.AppLockController()
+    }
+
     override val reportRepository: ReportRepository by lazy {
         ReportRepository(
             symptomLogDao = database.symptomLogDao(),
             analysisRunDao = database.analysisRunDao(),
+            photoRepository = symptomPhotoRepository,
+            doctorVisitRepository = doctorVisitRepository,
         )
     }
 
@@ -227,6 +377,70 @@ class DefaultAppContainer(
         ReportArchiveRepository(
             dao = database.reportArchiveDao(),
             pdfGenerator = healthReportPdfGenerator,
+        )
+    }
+
+    override val healthConnectService: HealthConnectService by lazy {
+        HealthConnectService(appContext)
+    }
+
+    override val healthPreferencesRepository: HealthPreferencesRepository by lazy {
+        HealthPreferencesRepository(appContext.healthPreferencesStore)
+    }
+
+    override val healthHistoryRepository: HealthHistoryRepository by lazy {
+        HealthHistoryRepository(appContext)
+    }
+
+    override val healthSampleSeeder: HealthSampleSeeder by lazy {
+        HealthSampleSeeder(appContext)
+    }
+
+    override val symptomLogSeeder: SymptomLogSeeder by lazy {
+        SymptomLogSeeder(repository = symptomLogRepository)
+    }
+
+    override val doctorVisitSeeder: DoctorVisitSeeder by lazy {
+        DoctorVisitSeeder(
+            visitRepository = doctorVisitRepository,
+            symptomLogRepository = symptomLogRepository,
+        )
+    }
+
+    override val medicationRepository: MedicationRepository by lazy {
+        MedicationRepository(
+            reminderDao = database.medicationReminderDao(),
+            doseEventDao = database.doseEventDao(),
+        )
+    }
+
+    override val medicationReminderScheduler: MedicationReminderScheduler by lazy {
+        MedicationReminderScheduler(appContext)
+    }
+
+    override val medicationReminderNotifier: MedicationReminderNotifier by lazy {
+        MedicationReminderNotifier(appContext)
+    }
+
+    override val symptomPhotoRepository: SymptomPhotoRepository by lazy {
+        SymptomPhotoRepository(
+            context = appContext,
+            dao = database.symptomPhotoDao(),
+        )
+    }
+
+    override val doctorVisitRepository: DoctorVisitRepository by lazy {
+        DoctorVisitRepository(
+            database = database,
+            visitDao = database.doctorVisitDao(),
+            diagnosisDao = database.doctorDiagnosisDao(),
+        )
+    }
+
+    override val healthConditionRepository: com.example.mob_dev_portfolio.data.condition.HealthConditionRepository by lazy {
+        com.example.mob_dev_portfolio.data.condition.HealthConditionRepository(
+            database = database,
+            dao = database.healthConditionDao(),
         )
     }
 

@@ -41,7 +41,7 @@ open class AnalysisNotifier(
      * the first notification can't leave us channel-less.
      */
     open fun ensureChannel() {
-        val manager = context.getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
+        val manager = context.getSystemService(NotificationManager::class.java)
         val existing = manager.getNotificationChannel(CHANNEL_ID)
         if (existing != null) return
         val channel = NotificationChannel(
@@ -123,7 +123,7 @@ open class AnalysisNotifier(
      *     ours, so the "tap the latest notification" case always opens the
      *     latest result.
      */
-    fun buildDeepLink(runId: Long? = null): PendingIntent {
+    private fun buildDeepLink(runId: Long? = null): PendingIntent {
         val intent = buildDeepLinkIntent(context, runId)
         return PendingIntent.getActivity(
             context,

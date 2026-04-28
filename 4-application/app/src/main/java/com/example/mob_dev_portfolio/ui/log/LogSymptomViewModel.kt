@@ -1,5 +1,6 @@
 package com.example.mob_dev_portfolio.ui.log
 
+import android.net.Uri
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.ViewModelProvider
 import androidx.lifecycle.viewModelScope
@@ -7,6 +8,9 @@ import androidx.lifecycle.viewmodel.CreationExtras
 import com.example.mob_dev_portfolio.AuraApplication
 import com.example.mob_dev_portfolio.data.SymptomLog
 import com.example.mob_dev_portfolio.data.SymptomLogRepository
+import com.example.mob_dev_portfolio.data.doctor.DoctorDiagnosis
+import com.example.mob_dev_portfolio.data.doctor.DoctorVisitRepository
+import com.example.mob_dev_portfolio.data.doctor.LogDoctorAnnotation
 import com.example.mob_dev_portfolio.data.environment.EnvironmentalFetchResult
 import com.example.mob_dev_portfolio.data.environment.EnvironmentalService
 import com.example.mob_dev_portfolio.data.environment.EnvironmentalSnapshot
@@ -14,11 +18,16 @@ import com.example.mob_dev_portfolio.data.location.CoordinateRounding
 import com.example.mob_dev_portfolio.data.location.LocationProvider
 import com.example.mob_dev_portfolio.data.location.LocationResult
 import com.example.mob_dev_portfolio.data.location.ReverseGeocoder
+import com.example.mob_dev_portfolio.data.photo.SymptomPhoto
+import com.example.mob_dev_portfolio.data.photo.SymptomPhotoRepository
 import kotlinx.coroutines.TimeoutCancellationException
 import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.flow.flowOf
+import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withTimeout
@@ -48,6 +57,44 @@ data class LogSymptomUiState(
      * screen observes this signal to launch the system permission dialog.
      */
     val shouldRequestLocationPermission: Boolean = false,
+    /**
+     * Photos already committed to the encrypted store and attached to the
+     * log being edited. Empty in create-mode because the log has no id yet
+     * — pending photos live in [pendingPhotoUris] until save flushes them
+     * through the attach pipeline.
+     */
+    val attachedPhotos: List<SymptomPhoto> = emptyList(),
+    /**
+     * Photos the user picked this session (camera or gallery) that haven't
+     * been committed yet. On save we iterate this list and call
+     * [SymptomPhotoRepository.addFromUri] for each one; the resulting
+     * [SymptomPhoto] rows show up via the observe subscription.
+     */
+    val pendingPhotoUris: List<Uri> = emptyList(),
+    /** True when CAMERA has been granted this session. */
+    val cameraPermissionGranted: Boolean = false,
+    /**
+     * Drives the rationale dialog shown after the user denies CAMERA —
+     * FR-PA-08 says gallery must still work, so the rationale explains
+     * the fallback rather than blocking them.
+     */
+    val showCameraDeniedRationale: Boolean = false,
+    /**
+     * Id of the diagnosis this log should be pinned to, or null to leave
+     * it unlinked. Persisted post-save via
+     * [DoctorVisitRepository.attachLogToDiagnosis]. On edit it's
+     * hydrated from the existing link so the picker reflects reality.
+     */
+    val selectedDiagnosisId: Long? = null,
+    /**
+     * Id of the user-declared health condition this log is grouped
+     * under, or null. Persisted post-save via
+     * [com.example.mob_dev_portfolio.data.condition.HealthConditionRepository.setLogCondition].
+     * Distinct from [selectedDiagnosisId]: that one represents a
+     * doctor-confirmed diagnosis tied to a specific visit, this one
+     * represents a standing condition the user added themselves.
+     */
+    val selectedConditionId: Long? = null,
 )
 
 class LogSymptomViewModel(
@@ -55,6 +102,20 @@ class LogSymptomViewModel(
     private val locationProvider: LocationProvider? = null,
     private val reverseGeocoder: ReverseGeocoder? = null,
     private val environmentalService: EnvironmentalService? = null,
+    private val symptomPhotoRepository: SymptomPhotoRepository? = null,
+    /**
+     * Optional so test doubles that don't exercise the doctor-visit
+     * path compile without wiring a fake — the picker just renders
+     * empty and [save] no-ops on the attach call.
+     */
+    private val doctorVisitRepository: DoctorVisitRepository? = null,
+    /**
+     * Optional user-declared health-condition repo. Same nullability
+     * rationale as [doctorVisitRepository] — older test doubles don't
+     * exercise the conditions feature, so an absent repo just means
+     * the picker renders empty and [save] no-ops on the link call.
+     */
+    private val healthConditionRepository: com.example.mob_dev_portfolio.data.condition.HealthConditionRepository? = null,
     private val editingId: Long = 0L,
     private val nowProvider: () -> Long = { System.currentTimeMillis() },
     private val environmentalTimeoutMillis: Long = ENVIRONMENTAL_FETCH_TIMEOUT_MILLIS,
@@ -70,9 +131,46 @@ class LogSymptomViewModel(
     )
     val state: StateFlow<LogSymptomUiState> = _state.asStateFlow()
 
+    /**
+     * Every diagnosis across every visit. Backs the "Link to diagnosis"
+     * dropdown on the log editor — only rendered when non-empty, so a
+     * user who has never logged a doctor visit sees no extra field.
+     */
+    val diagnoses: StateFlow<List<DoctorDiagnosis>> =
+        (doctorVisitRepository?.observeAllDiagnoses() ?: flowOf(emptyList()))
+            .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000L), emptyList())
+
+    /**
+     * User-declared health conditions, available for the "group under
+     * a condition" dropdown on the editor. Empty list when the repo
+     * isn't wired or the user has declared none — the picker renders
+     * itself out in that case so the form stays uncluttered.
+     */
+    val healthConditions: StateFlow<List<com.example.mob_dev_portfolio.data.condition.HealthCondition>> =
+        (healthConditionRepository?.observeAll() ?: flowOf(emptyList()))
+            .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000L), emptyList())
+
     init {
         if (editingId != 0L) {
             loadForEditing()
+            observeAttachedPhotos(editingId)
+            loadExistingDiagnosisLink(editingId)
+            loadExistingConditionLink(editingId)
+        }
+    }
+
+    /**
+     * Subscribe to the encrypted-photo repo for this log so new attachments
+     * (added mid-edit) show up in the editor strip immediately, and
+     * remove actions reflect without a manual refresh. Silently no-ops
+     * when the repo isn't wired (older test doubles, headless unit tests).
+     */
+    private fun observeAttachedPhotos(id: Long) {
+        val repo = symptomPhotoRepository ?: return
+        viewModelScope.launch {
+            repo.observeForLog(id).collect { photos ->
+                _state.update { it.copy(attachedPhotos = photos) }
+            }
         }
     }
 
@@ -120,6 +218,49 @@ class LogSymptomViewModel(
 
     fun retryLoadForEditing() {
         if (editingId != 0L) loadForEditing()
+    }
+
+    /**
+     * Read the current (if any) diagnosis link for the log being edited so
+     * the picker opens in sync with the DB. A cleared log counts as "not
+     * linked" for the purposes of this picker — clearing is an explicit
+     * signal that the log is done, so we don't surface a diagnosis tag
+     * that would invite the user to reinterpret it.
+     */
+    private fun loadExistingDiagnosisLink(id: Long) {
+        val repo = doctorVisitRepository ?: return
+        viewModelScope.launch {
+            val linked = runCatching { repo.observeLogAnnotation(id).first() }.getOrNull()
+            val existingDiagnosisId = (linked as? LogDoctorAnnotation.LinkedToDiagnosis)
+                ?.diagnosis?.id
+            _state.update { it.copy(selectedDiagnosisId = existingDiagnosisId) }
+        }
+    }
+
+    /**
+     * Picker change handler. Passing null unlinks the log on save.
+     * Toggling the same id off (passing null when it was set) is
+     * treated as "clear my link" — the save flow will detach it.
+     */
+    fun onSelectDiagnosis(diagnosisId: Long?) {
+        _state.update { it.copy(selectedDiagnosisId = diagnosisId) }
+    }
+
+    /** UI handler for the user-declared condition picker. */
+    fun onSelectCondition(conditionId: Long?) {
+        _state.update { it.copy(selectedConditionId = conditionId) }
+    }
+
+    /**
+     * Read the current condition link for the log being edited so the
+     * picker opens reflecting reality.
+     */
+    private fun loadExistingConditionLink(id: Long) {
+        val repo = healthConditionRepository ?: return
+        viewModelScope.launch {
+            val linked = runCatching { repo.observeConditionForLog(id).first() }.getOrNull()
+            _state.update { it.copy(selectedConditionId = linked?.id) }
+        }
     }
 
     fun onSymptomNameChange(value: String) = updateDraft(LogField.SymptomName) { copy(symptomName = value) }
@@ -198,6 +339,63 @@ class LogSymptomViewModel(
         _state.update { it.copy(showErrorBanner = false) }
     }
 
+    /**
+     * Fold a newly-picked photo into the pending list. Silently clamps
+     * to the 3-photo cap — the UI already disables the picker at the
+     * cap, but this is the belt-and-braces so a race between picker
+     * dismissal and state read can't slip a fourth photo through.
+     */
+    fun addPendingPhoto(uri: Uri) {
+        _state.update { current ->
+            val alreadyCommittedCount = current.attachedPhotos.size
+            val alreadyPendingCount = current.pendingPhotoUris.size
+            val cap = SymptomPhotoRepository.MAX_PHOTOS_PER_LOG
+            if (alreadyCommittedCount + alreadyPendingCount >= cap) return@update current
+            if (current.pendingPhotoUris.contains(uri)) return@update current
+            current.copy(pendingPhotoUris = current.pendingPhotoUris + uri)
+        }
+    }
+
+    fun removePendingPhoto(uri: Uri) {
+        _state.update { current ->
+            current.copy(pendingPhotoUris = current.pendingPhotoUris - uri)
+        }
+    }
+
+    /**
+     * Immediately commits a "remove" of an already-attached photo. We
+     * drop the row + file through the repository and let the observe
+     * subscription refresh the list — optimistic UI isn't worth the
+     * divergence risk here.
+     */
+    fun removeAttachedPhoto(photo: SymptomPhoto) {
+        val repo = symptomPhotoRepository ?: return
+        viewModelScope.launch {
+            runCatching { repo.delete(photo.id) }
+                .onFailure { throwable ->
+                    _state.update {
+                        it.copy(
+                            transientError = throwable.message
+                                ?: "Couldn't remove photo — please try again.",
+                        )
+                    }
+                }
+        }
+    }
+
+    fun onCameraPermissionResult(granted: Boolean) {
+        _state.update {
+            it.copy(
+                cameraPermissionGranted = granted,
+                showCameraDeniedRationale = if (!granted) true else it.showCameraDeniedRationale,
+            )
+        }
+    }
+
+    fun onCameraRationaleDismissed() {
+        _state.update { it.copy(showCameraDeniedRationale = false) }
+    }
+
     fun save(onSaved: () -> Unit) {
         val current = _state.value
         val result = LogValidator.validate(current.draft, now = nowProvider())
@@ -259,13 +457,14 @@ class LogSymptomViewModel(
                 pressureHpa = envOutcome.snapshot.pressureHpa,
                 airQualityIndex = envOutcome.snapshot.airQualityIndex,
             )
+            // We need the row id to attach photos to. On insert it's what
+            // `save()` returns; on update it's the existing editingId.
             val saveOutcome = runCatching {
                 if (isEditing) {
                     val rowsUpdated = repository.update(log)
-                    rowsUpdated > 0
+                    if (rowsUpdated > 0) current.editingId else 0L
                 } else {
                     repository.save(log)
-                    true
                 }
             }
             if (saveOutcome.isFailure) {
@@ -278,7 +477,8 @@ class LogSymptomViewModel(
                 }
                 return@launch
             }
-            if (saveOutcome.getOrNull() == false) {
+            val savedId = saveOutcome.getOrNull() ?: 0L
+            if (savedId <= 0L) {
                 _state.update {
                     it.copy(
                         isSaving = false,
@@ -287,17 +487,38 @@ class LogSymptomViewModel(
                 }
                 return@launch
             }
+
+            // Flush pending photos. We do this after the row is committed
+            // so the FK target exists; failures are collected into a
+            // single Snackbar-friendly message but the overall save is
+            // NOT rolled back — a log with 2/3 photos is still more
+            // useful than no log at all.
+            val photoWarning = flushPendingPhotos(savedId, current.pendingPhotoUris)
+
+            // Reconcile the diagnosis link. On edit we may be removing a
+            // link the user turned off in the picker, so "null selection"
+            // is a meaningful state (not a no-op). Failures are swallowed
+            // — the log itself is already saved and a missing link is
+            // recoverable from the doctor-visits screen.
+            applyDiagnosisLink(savedId, current.selectedDiagnosisId)
+            applyConditionLink(savedId, current.selectedConditionId)
             // Pick the most important warning to surface. Location warnings
             // already exist from the previous story; the environmental layer
             // adds its own (timeout, offline, API error). Both go to the same
             // Snackbar channel so we don't stack two toasts on top of each
             // other — location warning wins when both fire, because it's the
             // gating one (no location means the env fetch was skipped).
-            val finalWarning = capture.warning ?: envOutcome.warning
+            // Photo warning comes last (least gating) so it only surfaces
+            // when nothing else did.
+            val finalWarning = capture.warning ?: envOutcome.warning ?: photoWarning
             _state.update {
                 it.copy(
                     isSaving = false,
                     draft = if (isEditing) draft else LogDraft(startEpochMillis = nowProvider()),
+                    // Pending list is always cleared on a successful save —
+                    // on create they've been flushed to the new row, on
+                    // edit they've been flushed to the existing one.
+                    pendingPhotoUris = emptyList(),
                     savedConfirmation = when {
                         isEditing -> "Log updated"
                         capture.latitude != null && !envOutcome.snapshot.isEmpty -> "Log saved with location & weather"
@@ -305,10 +526,60 @@ class LogSymptomViewModel(
                         draft.attachLocation && finalWarning != null -> "Log saved — $finalWarning"
                         else -> "Log saved"
                     },
-                    transientError = if (!isEditing && finalWarning != null) finalWarning else it.transientError,
+                    transientError = finalWarning ?: it.transientError,
                 )
             }
             onSaved()
+        }
+    }
+
+    /**
+     * Persist the selected-diagnosis state by either attaching the log
+     * to one diagnosis (replacing any prior link) or detaching it from
+     * all diagnoses. Silently no-ops when the repo isn't wired.
+     */
+    private suspend fun applyDiagnosisLink(logId: Long, diagnosisId: Long?) {
+        val repo = doctorVisitRepository ?: return
+        runCatching {
+            if (diagnosisId != null) {
+                repo.attachLogToDiagnosis(logId, diagnosisId)
+            } else {
+                repo.detachLogFromAllDiagnoses(logId)
+            }
+        }
+    }
+
+    /**
+     * Persist the selected user-condition link (or clear it). Mirrors
+     * [applyDiagnosisLink] — silently no-ops when the repo isn't wired.
+     */
+    private suspend fun applyConditionLink(logId: Long, conditionId: Long?) {
+        val repo = healthConditionRepository ?: return
+        runCatching { repo.setLogCondition(logId, conditionId) }
+    }
+
+    /**
+     * Runs each pending URI through the photo repository. Returns a
+     * warning message when one or more photos failed, or null if every
+     * photo landed cleanly (including the zero-pending case).
+     *
+     * We deliberately swallow per-photo failures rather than short-
+     * circuiting — a stream that returns a null bitmap shouldn't stop
+     * the other two photos (and the log itself) from being saved.
+     */
+    private suspend fun flushPendingPhotos(logId: Long, uris: List<Uri>): String? {
+        if (uris.isEmpty()) return null
+        val repo = symptomPhotoRepository ?: return null
+        var successCount = 0
+        var failureCount = 0
+        uris.forEach { uri ->
+            val result = runCatching { repo.addFromUri(logId, uri) }.getOrNull()
+            if (result != null) successCount++ else failureCount++
+        }
+        return when {
+            failureCount == 0 -> null
+            successCount == 0 -> "Couldn't attach $failureCount photo${if (failureCount == 1) "" else "s"}."
+            else -> "Attached $successCount of ${successCount + failureCount} photos — the rest couldn't be processed."
         }
     }
 
@@ -471,6 +742,9 @@ class LogSymptomViewModel(
                     locationProvider = app.container.locationProvider,
                     reverseGeocoder = app.container.reverseGeocoder,
                     environmentalService = app.container.environmentalService,
+                    symptomPhotoRepository = app.container.symptomPhotoRepository,
+                    doctorVisitRepository = app.container.doctorVisitRepository,
+                    healthConditionRepository = app.container.healthConditionRepository,
                 ) as T
             }
         }
@@ -484,6 +758,9 @@ class LogSymptomViewModel(
                     locationProvider = app.container.locationProvider,
                     reverseGeocoder = app.container.reverseGeocoder,
                     environmentalService = app.container.environmentalService,
+                    symptomPhotoRepository = app.container.symptomPhotoRepository,
+                    doctorVisitRepository = app.container.doctorVisitRepository,
+                    healthConditionRepository = app.container.healthConditionRepository,
                     editingId = id,
                 ) as T
             }

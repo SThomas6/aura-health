@@ -1,7 +1,9 @@
 package com.example.mob_dev_portfolio.ui.log
 
 import android.Manifest
+import android.content.Context
 import android.content.pm.PackageManager
+import android.net.Uri
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.layout.Arrangement
@@ -29,6 +31,7 @@ import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.ErrorOutline
 import androidx.compose.material.icons.filled.LocationOn
 import androidx.compose.material.icons.filled.Schedule
+import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
@@ -64,6 +67,7 @@ import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -72,20 +76,45 @@ import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.core.content.ContextCompat
+import androidx.core.content.FileProvider
 import androidx.compose.ui.window.Dialog
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewmodel.compose.viewModel
+import com.example.mob_dev_portfolio.AuraApplication
 import com.example.mob_dev_portfolio.data.ContextTagCatalog
 import com.example.mob_dev_portfolio.data.SymptomCatalog
+import com.example.mob_dev_portfolio.data.doctor.DoctorDiagnosis
+import com.example.mob_dev_portfolio.data.photo.SymptomPhotoRepository
+import java.io.File
 import java.time.Instant
 import java.time.LocalDate
 import java.time.LocalDateTime
 import java.time.LocalTime
 import java.time.ZoneId
 import java.time.format.DateTimeFormatter
+import java.util.UUID
 
 private val DateFormatter: DateTimeFormatter = DateTimeFormatter.ofPattern("EEE, d MMM yyyy")
 private val TimeFormatter: DateTimeFormatter = DateTimeFormatter.ofPattern("HH:mm")
+
+/**
+ * Stages a fresh camera-capture target under `cacheDir/camera_temp/` and
+ * returns a content URI routable through the app's FileProvider. The
+ * camera app writes the JPEG here; the photo pipeline then reads it
+ * back, sanitises it, and encrypts it into internal storage before the
+ * intermediate file is eligible for OS cache eviction.
+ *
+ * A new UUID per call means two rapid-fire captures can't clobber each
+ * other, and we never accumulate a pile of old files because the
+ * pipeline consumes them on success; failed captures remain in the
+ * cache subdir where the OS reclaims them on memory pressure.
+ */
+private fun createCameraTempUri(context: Context): Uri {
+    val dir = File(context.cacheDir, "camera_temp").apply { if (!exists()) mkdirs() }
+    val file = File(dir, "capture_${UUID.randomUUID()}.jpg")
+    val authority = "${context.packageName}.fileprovider"
+    return FileProvider.getUriForFile(context, authority, file)
+}
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -95,13 +124,72 @@ fun LogSymptomScreen(
     viewModel: LogSymptomViewModel = viewModel(factory = LogSymptomViewModel.Factory),
 ) {
     val uiState by viewModel.state.collectAsStateWithLifecycle()
+    val diagnoses by viewModel.diagnoses.collectAsStateWithLifecycle()
+    val healthConditions by viewModel.healthConditions.collectAsStateWithLifecycle()
     val snackbarHost = remember { SnackbarHostState() }
     val context = LocalContext.current
+
+    // AppContainer hands us the photo repository for the thumbnails —
+    // the VM owns *writes*, but the Compose thumbnail loader needs
+    // read access without routing through state.
+    val photoRepository = remember {
+        (context.applicationContext as AuraApplication).container.symptomPhotoRepository
+    }
+
+    // The biometric-lock session flag. We tell it to ignore the next
+    // `onStop` each time we deliberately start a sibling activity
+    // (camera / gallery) so the user doesn't get re-prompted on return
+    // and — just as importantly — the `AuraApp` composition isn't torn
+    // down, which would wipe `pendingCameraUri` and strand the
+    // launcher callback.
+    val appLockController = remember {
+        (context.applicationContext as AuraApplication).container.appLockController
+    }
 
     val permissionLauncher = rememberLauncherForActivityResult(
         contract = ActivityResultContracts.RequestPermission(),
     ) { granted ->
         viewModel.onLocationPermissionResult(granted)
+    }
+
+    // Gallery picker. PickVisualMedia is the permission-less modern
+    // contract — it takes a content-URI grant scoped to the one
+    // selected item. No runtime permission is ever requested.
+    val galleryLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.PickVisualMedia(),
+    ) { uri ->
+        uri?.let(viewModel::addPendingPhoto)
+    }
+
+    // Camera pipeline. The TakePicture contract writes the JPEG to a
+    // URI we provide, so we stage a new file under cacheDir/camera_temp/
+    // each time and hand a FileProvider URI to the intent. The URI is
+    // kept in rememberSaveable so it survives process death behind the
+    // camera app — Android can and does reclaim memory-hungry hosts
+    // while a full-screen camera holds the screen, and losing the
+    // target URI would mean silently dropping the capture.
+    var pendingCameraUri by rememberSaveable { mutableStateOf<Uri?>(null) }
+    val cameraLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.TakePicture(),
+    ) { success ->
+        val uri = pendingCameraUri
+        if (success && uri != null) viewModel.addPendingPhoto(uri)
+        pendingCameraUri = null
+    }
+
+    val cameraPermissionLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.RequestPermission(),
+    ) { granted ->
+        viewModel.onCameraPermissionResult(granted)
+        if (granted) {
+            val uri = createCameraTempUri(context)
+            pendingCameraUri = uri
+            // Grant permission flow chains straight into the camera
+            // activity — same onStop suppression rationale as the
+            // direct-launch path below.
+            appLockController.suppressNextRelock()
+            cameraLauncher.launch(uri)
+        }
     }
 
     // Seed permission state on first composition — covers the case where the
@@ -112,6 +200,11 @@ fun LogSymptomScreen(
             Manifest.permission.ACCESS_COARSE_LOCATION,
         ) == PackageManager.PERMISSION_GRANTED
         if (alreadyGranted) viewModel.onLocationPermissionResult(true)
+        val cameraAlreadyGranted = ContextCompat.checkSelfPermission(
+            context,
+            Manifest.permission.CAMERA,
+        ) == PackageManager.PERMISSION_GRANTED
+        if (cameraAlreadyGranted) viewModel.onCameraPermissionResult(true)
     }
 
     LaunchedEffect(uiState.shouldRequestLocationPermission) {
@@ -293,7 +386,7 @@ fun LogSymptomScreen(
             OutlinedTextField(
                 value = uiState.draft.notes,
                 onValueChange = viewModel::onNotesChange,
-                label = { Text("Notes") },
+                label = { Text("Additional context") },
                 placeholder = { Text("Anything else worth remembering") },
                 modifier = Modifier
                     .fillMaxWidth()
@@ -301,6 +394,32 @@ fun LogSymptomScreen(
                     .testTag("field_notes"),
                 minLines = 3,
             )
+
+            if (diagnoses.isNotEmpty()) {
+                HorizontalDivider()
+                SectionHeader(
+                    "Link to diagnosis",
+                    "Tag this log to a doctor-confirmed diagnosis from a visit (optional).",
+                )
+                DiagnosisPicker(
+                    diagnoses = diagnoses,
+                    selectedId = uiState.selectedDiagnosisId,
+                    onSelect = viewModel::onSelectDiagnosis,
+                )
+            }
+
+            if (healthConditions.isNotEmpty()) {
+                HorizontalDivider()
+                SectionHeader(
+                    "Group under a condition",
+                    "Pin this log to one of your standing health conditions so it shows up grouped on the Symptoms list (optional).",
+                )
+                HealthConditionPicker(
+                    conditions = healthConditions,
+                    selectedId = uiState.selectedConditionId,
+                    onSelect = viewModel::onSelectCondition,
+                )
+            }
 
             HorizontalDivider()
 
@@ -310,6 +429,69 @@ fun LogSymptomScreen(
                 capturedLocationName = uiState.draft.locationName,
                 onToggle = viewModel::onAttachLocationChange,
             )
+
+            HorizontalDivider()
+
+            // FR-PA-01 / 02 / 03 / 05 — Photo attachments strip. The
+            // editor composable owns the 3-photo cap UX, remove-with-
+            // confirmation dialogs, and thumbnail rendering; we only
+            // wire the picker launchers and VM callbacks here.
+            val totalAttached = uiState.attachedPhotos.size + uiState.pendingPhotoUris.size
+            val capReached = totalAttached >= SymptomPhotoRepository.MAX_PHOTOS_PER_LOG
+            PhotoAttachmentsEditor(
+                attachedPhotos = uiState.attachedPhotos,
+                pendingPhotoUris = uiState.pendingPhotoUris,
+                capReached = capReached,
+                photoRepository = photoRepository,
+                onTakePhoto = {
+                    if (uiState.cameraPermissionGranted) {
+                        val uri = createCameraTempUri(context)
+                        pendingCameraUri = uri
+                        // Suppress the biometric re-prompt that would
+                        // otherwise fire when the camera activity takes
+                        // foreground and our MainActivity hits onStop.
+                        appLockController.suppressNextRelock()
+                        cameraLauncher.launch(uri)
+                    } else {
+                        cameraPermissionLauncher.launch(Manifest.permission.CAMERA)
+                    }
+                },
+                onPickFromGallery = {
+                    // Photo picker opens its own activity → onStop
+                    // fires. Same suppression rationale as the camera
+                    // path: otherwise the user re-authenticates and
+                    // the callback lands in a freshly-composed screen
+                    // that has already forgotten about the pick.
+                    appLockController.suppressNextRelock()
+                    galleryLauncher.launch(
+                        androidx.activity.result.PickVisualMediaRequest(
+                            ActivityResultContracts.PickVisualMedia.ImageOnly,
+                        ),
+                    )
+                },
+                onRemovePending = viewModel::removePendingPhoto,
+                onRemoveAttached = viewModel::removeAttachedPhoto,
+            )
+
+            if (uiState.showCameraDeniedRationale) {
+                AlertDialog(
+                    onDismissRequest = viewModel::onCameraRationaleDismissed,
+                    title = { Text("Camera access needed") },
+                    text = {
+                        Text(
+                            "Grant the camera permission in Settings to take photos. " +
+                                "You can still pick photos from your gallery without it.",
+                        )
+                    },
+                    confirmButton = {
+                        TextButton(
+                            onClick = viewModel::onCameraRationaleDismissed,
+                            modifier = Modifier.testTag("btn_camera_rationale_ok"),
+                        ) { Text("OK") }
+                    },
+                    modifier = Modifier.testTag("dialog_camera_denied"),
+                )
+            }
 
             Spacer(Modifier.height(8.dp))
 
@@ -344,6 +526,123 @@ private fun SectionHeader(title: String, subtitle: String) {
             style = MaterialTheme.typography.bodyMedium,
             color = MaterialTheme.colorScheme.onSurfaceVariant,
         )
+    }
+}
+
+/**
+ * Read-only dropdown for pinning the log to one of the doctor-flagged
+ * diagnoses. "None" clears the link on save — passed up as a null
+ * selection so the VM can issue a detach instead of an attach.
+ */
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+private fun DiagnosisPicker(
+    diagnoses: List<DoctorDiagnosis>,
+    selectedId: Long?,
+    onSelect: (Long?) -> Unit,
+) {
+    var expanded by rememberSaveable { mutableStateOf(false) }
+    val selectedLabel = remember(selectedId, diagnoses) {
+        diagnoses.firstOrNull { it.id == selectedId }?.label
+    }
+
+    ExposedDropdownMenuBox(
+        expanded = expanded,
+        onExpandedChange = { expanded = it },
+    ) {
+        OutlinedTextField(
+            value = selectedLabel?.ifBlank { "(unlabelled issue)" } ?: "None",
+            onValueChange = {},
+            readOnly = true,
+            label = { Text("Diagnosis link") },
+            trailingIcon = { ExposedDropdownMenuDefaults.TrailingIcon(expanded = expanded) },
+            modifier = Modifier
+                .menuAnchor(MenuAnchorType.PrimaryNotEditable, enabled = true)
+                .fillMaxWidth()
+                .testTag("field_diagnosis_link"),
+        )
+        ExposedDropdownMenu(
+            expanded = expanded,
+            onDismissRequest = { expanded = false },
+        ) {
+            DropdownMenuItem(
+                text = { Text("None") },
+                onClick = {
+                    expanded = false
+                    onSelect(null)
+                },
+                modifier = Modifier.testTag("diagnosis_option_none"),
+            )
+            diagnoses.forEach { diagnosis ->
+                DropdownMenuItem(
+                    text = { Text(diagnosis.label.ifBlank { "(unlabelled issue)" }) },
+                    onClick = {
+                        expanded = false
+                        onSelect(diagnosis.id)
+                    },
+                    modifier = Modifier.testTag("diagnosis_option_${diagnosis.id}"),
+                )
+            }
+        }
+    }
+}
+
+/**
+ * Mirror of [DiagnosisPicker] for user-declared health conditions.
+ * Two separate composables (rather than a generic one) because the
+ * domain models live in different modules and the test tags differ —
+ * keeping them parallel makes the rendering trivial to read.
+ */
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+private fun HealthConditionPicker(
+    conditions: List<com.example.mob_dev_portfolio.data.condition.HealthCondition>,
+    selectedId: Long?,
+    onSelect: (Long?) -> Unit,
+) {
+    var expanded by rememberSaveable { mutableStateOf(false) }
+    val selectedLabel = remember(selectedId, conditions) {
+        conditions.firstOrNull { it.id == selectedId }?.name
+    }
+
+    ExposedDropdownMenuBox(
+        expanded = expanded,
+        onExpandedChange = { expanded = it },
+    ) {
+        OutlinedTextField(
+            value = selectedLabel ?: "None",
+            onValueChange = {},
+            readOnly = true,
+            label = { Text("Health condition") },
+            trailingIcon = { ExposedDropdownMenuDefaults.TrailingIcon(expanded = expanded) },
+            modifier = Modifier
+                .menuAnchor(MenuAnchorType.PrimaryNotEditable, enabled = true)
+                .fillMaxWidth()
+                .testTag("field_condition_link"),
+        )
+        ExposedDropdownMenu(
+            expanded = expanded,
+            onDismissRequest = { expanded = false },
+        ) {
+            DropdownMenuItem(
+                text = { Text("None") },
+                onClick = {
+                    expanded = false
+                    onSelect(null)
+                },
+                modifier = Modifier.testTag("condition_option_none"),
+            )
+            conditions.forEach { condition ->
+                DropdownMenuItem(
+                    text = { Text(condition.name) },
+                    onClick = {
+                        expanded = false
+                        onSelect(condition.id)
+                    },
+                    modifier = Modifier.testTag("condition_option_${condition.id}"),
+                )
+            }
+        }
     }
 }
 
@@ -389,39 +688,98 @@ private fun SymptomPicker(
     errorText: String?,
 ) {
     var expanded by remember { mutableStateOf(false) }
-    val filteredOptions = remember(value) {
-        if (value.isBlank()) SymptomCatalog.presets
-        else SymptomCatalog.presets.filter { it.contains(value, ignoreCase = true) && !it.equals(value, ignoreCase = true) }
+
+    // "Custom mode" means the user has opted out of the preset list and
+    // wants to type their own symptom — at that point (and only then) the
+    // field becomes editable and the soft keyboard can appear. This is the
+    // fix for "the keyboard takes over the screen before I've even chosen
+    // anything": by default, tapping the field opens the dropdown, not the
+    // IME.
+    //
+    // We seed custom mode to true when the caller hands us a value that
+    // isn't in the preset list — e.g. when editing an existing log whose
+    // symptom is "Earache" — so the field stays typeable on reopen.
+    var customMode by remember(value) {
+        mutableStateOf(value.isNotBlank() && value !in SymptomCatalog.presets)
+    }
+
+    // When the field is read-only we always want the full preset list in
+    // the dropdown. In custom mode the user is typing freely, so we
+    // narrow the list to matches (excluding their exact text so there's
+    // never a redundant "Headache" item when they've typed "Headache").
+    val dropdownOptions = remember(value, customMode) {
+        val base = SymptomCatalog.presets + SymptomCatalog.OTHER
+        if (!customMode || value.isBlank()) {
+            base
+        } else {
+            base.filter {
+                it.equals(SymptomCatalog.OTHER, ignoreCase = true) ||
+                    (it.contains(value, ignoreCase = true) && !it.equals(value, ignoreCase = true))
+            }
+        }
     }
 
     ExposedDropdownMenuBox(
-        expanded = expanded && filteredOptions.isNotEmpty(),
+        expanded = expanded && dropdownOptions.isNotEmpty(),
         onExpandedChange = { expanded = it },
     ) {
         OutlinedTextField(
             value = value,
             onValueChange = {
+                // Only reachable while customMode == true — read-only mode
+                // silently drops IME keystrokes, so this is a no-op path
+                // when the user is picking from presets.
                 onValueChange(it)
                 expanded = true
             },
+            // readOnly suppresses the soft keyboard even when the field is
+            // focused. Combined with PrimaryNotEditable below, tapping the
+            // field opens the dropdown rather than the IME.
+            readOnly = !customMode,
             label = { Text("Symptom type") },
-            placeholder = { Text("Choose a preset or type your own") },
+            placeholder = {
+                Text(
+                    if (customMode) "Type your symptom"
+                    else "Choose a preset (or pick Other to type)",
+                )
+            },
             trailingIcon = { ExposedDropdownMenuDefaults.TrailingIcon(expanded = expanded) },
             isError = isError,
             supportingText = errorText?.let { { Text(it) } },
             singleLine = true,
             modifier = Modifier
-                .menuAnchor(MenuAnchorType.PrimaryEditable, enabled = true)
+                .menuAnchor(
+                    // PrimaryEditable while custom, PrimaryNotEditable
+                    // while picking from presets. The NotEditable variant
+                    // tells the anchor to treat taps as "open the menu",
+                    // which is what gives us the "no keyboard until Other"
+                    // behaviour the user asked for.
+                    if (customMode) MenuAnchorType.PrimaryEditable
+                    else MenuAnchorType.PrimaryNotEditable,
+                    enabled = true,
+                )
                 .fillMaxWidth()
                 .testTag("field_symptom"),
         )
         SymptomDropdown(
-            expanded = expanded && filteredOptions.isNotEmpty(),
+            expanded = expanded && dropdownOptions.isNotEmpty(),
             onDismiss = { expanded = false },
-            options = filteredOptions,
-            onPick = {
-                onValueChange(it)
+            options = dropdownOptions,
+            onPick = { picked ->
                 expanded = false
+                if (picked == SymptomCatalog.OTHER) {
+                    // Flip to custom mode and clear the field so the user
+                    // starts with an empty input rather than seeing the
+                    // literal word "Other" sitting in the box.
+                    customMode = true
+                    onValueChange("")
+                } else {
+                    // Any preset pick resets custom mode — if the user
+                    // typed something and then changed their mind, we go
+                    // back to read-only and the keyboard collapses.
+                    customMode = false
+                    onValueChange(picked)
+                }
             },
         )
     }

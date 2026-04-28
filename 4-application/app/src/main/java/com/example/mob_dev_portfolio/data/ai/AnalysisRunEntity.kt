@@ -59,6 +59,19 @@ data class AnalysisRunEntity(
      * and bold spans all survive.
      */
     val summaryText: String,
+
+    /**
+     * Comma-separated short labels of the Health Connect metrics that
+     * actually contributed data to this run (i.e. toggled on AND
+     * permission granted AND window non-empty at analysis time).
+     *
+     * Nullable — older rows written before migration 6→7 carry NULL and
+     * the detail screen renders "no health data" rather than crashing.
+     * An empty string means "health connect considered, zero metrics
+     * usable" and is distinct from NULL so a user who toggled off every
+     * metric still gets a truthful "none" indicator.
+     */
+    val healthMetricsCsv: String? = null,
 )
 
 /**

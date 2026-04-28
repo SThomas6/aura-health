@@ -36,18 +36,26 @@ open class AnalysisHistoryRepository(
      * Insert a fresh run. Returns the generated rowId so callers can
      * stash it somewhere (e.g. to construct a deep-link that lands on
      * the specific run's detail view).
+     *
+     * [healthMetricsShortLabels] is the list of Health Connect metric
+     * short labels that actually contributed data to the run. An empty
+     * list is persisted as an empty CSV (distinct from null) so the
+     * detail screen can differentiate "health integration considered
+     * but nothing readable" from "run pre-dates health integration".
      */
     open suspend fun recordRun(
         summaryText: String,
         guidance: AnalysisGuidance,
         completedAtEpochMillis: Long,
         logIds: List<Long>,
+        healthMetricsShortLabels: List<String>? = null,
     ): Long = dao.insertRunWithLogs(
         run = AnalysisRunEntity(
             completedAtEpochMillis = completedAtEpochMillis,
             guidanceName = guidance.name,
             headline = guidance.headline,
             summaryText = summaryText,
+            healthMetricsCsv = healthMetricsShortLabels?.joinToString(","),
         ),
         logIds = logIds,
     )
@@ -73,6 +81,14 @@ data class AnalysisRun(
     val guidance: AnalysisGuidance,
     val headline: String,
     val summaryText: String,
+    /**
+     * The Health Connect metric short-labels ("Steps", "Sleep", etc.)
+     * that this run's prompt actually incorporated. Null for rows
+     * written before the health integration migration; empty list for
+     * runs where the integration was active but yielded nothing
+     * readable.
+     */
+    val healthMetricsShortLabels: List<String>?,
 )
 
 private fun AnalysisRunEntity.toDomain(): AnalysisRun =
@@ -83,4 +99,7 @@ private fun AnalysisRunEntity.toDomain(): AnalysisRun =
             .getOrDefault(AnalysisGuidance.Clear),
         headline = headline,
         summaryText = summaryText,
+        healthMetricsShortLabels = healthMetricsCsv?.split(',')
+            ?.map { it.trim() }
+            ?.filter { it.isNotEmpty() },
     )

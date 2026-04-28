@@ -61,7 +61,7 @@ object PlaintextDatabaseMigrator {
             .getOrDefault(emptyList())
     }
 
-    suspend fun importInto(dao: SymptomLogDao, rows: List<SymptomLogEntity>): Int {
+    private suspend fun importInto(dao: SymptomLogDao, rows: List<SymptomLogEntity>): Int {
         var imported = 0
         rows.forEach { row ->
             runCatching { dao.insert(row) }

@@ -9,11 +9,15 @@ import com.example.mob_dev_portfolio.AuraApplication
 import com.example.mob_dev_portfolio.data.SymptomLog
 import com.example.mob_dev_portfolio.data.ai.AnalysisGuidance
 import com.example.mob_dev_portfolio.data.ai.AnalysisResult
+import com.example.mob_dev_portfolio.data.doctor.DoctorContextSnapshot
+import com.example.mob_dev_portfolio.data.health.HealthConnectMetric
+import com.example.mob_dev_portfolio.data.health.HealthSnapshot
 import com.example.mob_dev_portfolio.data.preferences.UserProfile
 import com.example.mob_dev_portfolio.notifications.AnalysisNotifier
 import kotlinx.coroutines.TimeoutCancellationException
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.withTimeout
+import java.time.Instant
 
 /**
  * Runs the Gemini analysis in a WorkManager-managed coroutine so the call
@@ -45,6 +49,10 @@ class AnalysisWorker(
         notifier.ensureChannel() // idempotent — guarantees the channel exists before we post.
 
         val userContext = inputData.getString(KEY_USER_CONTEXT).orEmpty()
+        // Background/scheduled runs pass KEY_SCHEDULED = true. We use this
+        // later to keep "all clear" results silent — the user only asked to
+        // be pinged when something needs attention.
+        val isScheduled = inputData.getBoolean(KEY_SCHEDULED, false)
 
         // Second-guess connectivity at the start of work. The user's network
         // state may have changed since the ViewModel enqueued us; re-checking
@@ -52,7 +60,13 @@ class AnalysisWorker(
         // "no network" notification than a socket-level UnknownHostException
         // bubbling up.
         if (!container.networkConnectivity.isOnline()) {
-            notifier.notifyFailure(AnalysisNotifier.FailureReason.NoNetwork)
+            // Scheduled runs are invisible on purpose — no user was waiting
+            // for a result, so a "couldn't reach the server" notification
+            // at 3am would just be noise. WorkManager will retry on the
+            // next weekly tick when connectivity is back.
+            if (!isScheduled) {
+                notifier.notifyFailure(AnalysisNotifier.FailureReason.NoNetwork)
+            }
             return Result.failure(
                 Data.Builder().putString(KEY_FAILURE_KIND, FAILURE_NO_NETWORK).build(),
             )
@@ -65,16 +79,68 @@ class AnalysisWorker(
                 container.symptomLogRepository.observeAll().first()
             }.getOrDefault(emptyList())
 
+            // Health Connect snapshot — best-effort. A failure here must
+            // NOT block the analysis: if the SDK throws or the user hasn't
+            // granted anything, we fall back to Empty and the prompt runs
+            // without health context, which matches the story's
+            // "graceful degradation" acceptance criterion.
+            val healthSnapshot = runCatching {
+                // Two gates: the user must both be connected AND have
+                // opted in to AI inclusion. A connected user who flips
+                // the AI toggle off still gets their dashboard but their
+                // readings stay out of the prompt.
+                val connectionOn = container.healthPreferencesRepository
+                    .connectionActive.first()
+                val integrationOn = container.healthPreferencesRepository
+                    .integrationEnabled.first()
+                if (!connectionOn || !integrationOn) return@runCatching HealthSnapshot.Empty
+                val enabled = container.healthPreferencesRepository
+                    .enabledMetrics.first()
+                if (enabled.isEmpty()) return@runCatching HealthSnapshot.Empty
+                container.healthConnectService.buildSnapshot(
+                    enabledMetrics = enabled,
+                    logStartTimes = logs.associate {
+                        it.id to Instant.ofEpochMilli(it.startEpochMillis)
+                    },
+                )
+            }.getOrDefault(HealthSnapshot.Empty)
+
+            // Doctor-visits snapshot — cleared logs get filtered out of the
+            // prompt entirely, diagnosis-linked logs get annotated. Failure
+            // here is soft (empty snapshot) so a broken doctor-data path
+            // can never wedge the analysis pipeline.
+            val doctorContext = runCatching {
+                container.doctorVisitRepository.snapshotForAnalysis()
+            }.getOrDefault(DoctorContextSnapshot.Empty)
+
+            // User-declared standing conditions (e.g. "Type 2 Diabetes")
+            // — feeds the prompt's "background context" block alongside
+            // the doctor-confirmed diagnoses. Same soft-failure rule as
+            // doctorContext: an empty snapshot can never block the run.
+            val userConditions = runCatching {
+                container.healthConditionRepository.snapshotForAnalysis()
+            }.getOrDefault(com.example.mob_dev_portfolio.data.condition.UserConditionsSnapshot.Empty)
+
             val outcome = withTimeout(TIMEOUT_MILLIS) {
-                container.analysisService.analyze(profile, userContext, logs)
+                container.analysisService.analyze(
+                    profile = profile,
+                    userContext = userContext,
+                    logs = logs,
+                    healthSnapshot = healthSnapshot,
+                    doctorContext = doctorContext,
+                    userConditions = userConditions,
+                )
             }
 
-            handleOutcome(container, notifier, outcome, logs)
+            handleOutcome(container, notifier, outcome, logs, healthSnapshot, isScheduled)
         } catch (_: TimeoutCancellationException) {
             // withTimeout translates to a cancellation we can catch here;
             // the coroutine is already cancelled at this point so no more
-            // work happens. We still need to notify the user.
-            notifier.notifyFailure(AnalysisNotifier.FailureReason.Timeout)
+            // work happens. We still need to notify the user — unless this
+            // was a background scheduled run, in which case silence.
+            if (!isScheduled) {
+                notifier.notifyFailure(AnalysisNotifier.FailureReason.Timeout)
+            }
             Result.failure(
                 Data.Builder().putString(KEY_FAILURE_KIND, FAILURE_TIMEOUT).build(),
             )
@@ -85,9 +151,11 @@ class AnalysisWorker(
             // rethrowing it first — otherwise WorkManager's own cancellation
             // support breaks.
             if (error is kotlinx.coroutines.CancellationException) throw error
-            notifier.notifyFailure(
-                AnalysisNotifier.FailureReason.ApiError(error.message ?: "Unexpected failure"),
-            )
+            if (!isScheduled) {
+                notifier.notifyFailure(
+                    AnalysisNotifier.FailureReason.ApiError(error.message ?: "Unexpected failure"),
+                )
+            }
             Result.failure(
                 Data.Builder()
                     .putString(KEY_FAILURE_KIND, FAILURE_API_ERROR)
@@ -102,6 +170,8 @@ class AnalysisWorker(
         notifier: AnalysisNotifier,
         outcome: AnalysisResult,
         logs: List<SymptomLog>,
+        healthSnapshot: HealthSnapshot,
+        isScheduled: Boolean,
     ): Result = when (outcome) {
         is AnalysisResult.Success -> {
             val guidance = AnalysisGuidance.fromSummary(
@@ -115,11 +185,19 @@ class AnalysisWorker(
             // below can carry the real rowId: if the write throws we bail
             // out before notifying and the user retries rather than being
             // told a run succeeded that has no row to open.
+            //
+            // The health-metrics list is persisted as a lightweight CSV
+            // (see [AnalysisRunEntity.healthMetricsCsv]) so the detail
+            // screen can surface "the AI considered: Steps, Sleep…"
+            // without re-hitting Health Connect. Passing null here would
+            // indicate a pre-migration row; we want the explicit empty
+            // list to mean "integration active, nothing readable".
             val runId = container.analysisHistoryRepository.recordRun(
                 summaryText = outcome.summaryText,
                 guidance = guidance,
                 completedAtEpochMillis = completedAt,
                 logIds = logs.map { it.id },
+                healthMetricsShortLabels = healthSnapshot.shortLabelList(),
             )
 
             // DataStore — one-slot cache of the latest successful run, kept
@@ -133,7 +211,19 @@ class AnalysisWorker(
                 completedAtEpochMillis = completedAt,
             )
 
-            notifier.notifySuccess(guidance = guidance, runId = runId)
+            // Notification gating.
+            //   - Manual run: always notify — the user explicitly asked for
+            //     an analysis and expects a ping when it's done, whether
+            //     the verdict is Clear or SeekAdvice.
+            //   - Scheduled run: only notify when the result is SeekAdvice.
+            //     The user's explicit ask was "if it's in the all clear it
+            //     shouldn't give a notification", so a Clear background run
+            //     is persisted silently to history and the detail can be
+            //     browsed later if the user ever wants to.
+            val shouldNotify = !isScheduled || guidance == AnalysisGuidance.SeekAdvice
+            if (shouldNotify) {
+                notifier.notifySuccess(guidance = guidance, runId = runId)
+            }
             Result.success(
                 Data.Builder()
                     .putString(KEY_GUIDANCE, guidance.name)
@@ -142,19 +232,19 @@ class AnalysisWorker(
             )
         }
         AnalysisResult.NoNetwork -> {
-            notifier.notifyFailure(AnalysisNotifier.FailureReason.NoNetwork)
+            if (!isScheduled) notifier.notifyFailure(AnalysisNotifier.FailureReason.NoNetwork)
             Result.failure(
                 Data.Builder().putString(KEY_FAILURE_KIND, FAILURE_NO_NETWORK).build(),
             )
         }
         AnalysisResult.Timeout -> {
-            notifier.notifyFailure(AnalysisNotifier.FailureReason.Timeout)
+            if (!isScheduled) notifier.notifyFailure(AnalysisNotifier.FailureReason.Timeout)
             Result.failure(
                 Data.Builder().putString(KEY_FAILURE_KIND, FAILURE_TIMEOUT).build(),
             )
         }
         is AnalysisResult.ApiError -> {
-            notifier.notifyFailure(AnalysisNotifier.FailureReason.ApiError(outcome.message))
+            if (!isScheduled) notifier.notifyFailure(AnalysisNotifier.FailureReason.ApiError(outcome.message))
             Result.failure(
                 Data.Builder()
                     .putString(KEY_FAILURE_KIND, FAILURE_API_ERROR)
@@ -164,9 +254,32 @@ class AnalysisWorker(
         }
     }
 
+    /**
+     * Persist-friendly projection of which Health Connect metrics were
+     * readable at analysis time. Returns null when the snapshot is
+     * [HealthSnapshot.Empty] (no integration, no grants, SDK missing)
+     * so the Room row stays null and the UI can tell "integration
+     * wasn't active" apart from "integration active, no data found".
+     */
+    private fun HealthSnapshot.shortLabelList(): List<String>? {
+        if (this === HealthSnapshot.Empty) return null
+        if (includedMetrics.isEmpty() && aggregate7Day.isEmpty) return null
+        return includedMetrics
+            .sortedBy { it.ordinal }
+            .map(HealthConnectMetric::shortLabel)
+    }
+
     companion object {
         /** The free-text the user typed on the Analysis screen. */
         const val KEY_USER_CONTEXT = "user_context"
+
+        /**
+         * Marks a run as coming from the weekly background schedule rather
+         * than a user tap. Scheduled runs suppress notifications unless the
+         * result is [AnalysisGuidance.SeekAdvice], per the user's explicit
+         * "only notify if there's a problem" requirement.
+         */
+        const val KEY_SCHEDULED = "scheduled"
 
         /** Success output — the guidance enum name. */
         const val KEY_GUIDANCE = "guidance"
@@ -206,5 +319,14 @@ class AnalysisWorker(
          * analysis" a second time — we only ever want one outstanding.
          */
         const val UNIQUE_WORK_NAME: String = "aura_analysis_once"
+
+        /**
+         * Unique work name for the recurring weekly background analysis.
+         * Kept separate from [UNIQUE_WORK_NAME] so a manual "run now" tap
+         * (REPLACE policy) never cancels the scheduled cadence, and vice
+         * versa — they're independent lifecycles that both belong to the
+         * same worker class.
+         */
+        const val UNIQUE_WEEKLY_NAME: String = "aura_analysis_weekly"
     }
 }

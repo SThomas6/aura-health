@@ -12,7 +12,6 @@ import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
-import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.lazy.LazyColumn
@@ -57,7 +56,12 @@ import java.time.ZoneId
 import java.time.format.DateTimeFormatter
 import java.util.Locale
 
-private val HistoryDateFormat: DateTimeFormatter =
+// Built per-call rather than held in a top-level val so the day/month
+// names follow the user's CURRENT locale at format time. Capturing
+// Locale.getDefault() into a top-level val locks the formatter to the
+// locale at process start — switch device language and the historic
+// rows keep stale day-of-week names until next cold start.
+private fun historyDateFormat(): DateTimeFormatter =
     DateTimeFormatter.ofPattern("EEE d MMM yyyy · HH:mm", Locale.getDefault())
 
 /**
@@ -214,7 +218,7 @@ private fun ReportHistoryRow(
                 .atZone(ZoneId.systemDefault())
                 .toLocalDateTime()
             Text(
-                generated.format(HistoryDateFormat),
+                generated.format(historyDateFormat()),
                 style = MaterialTheme.typography.titleSmall,
                 fontWeight = FontWeight.SemiBold,
                 fontFamily = AuraMonoFamily,
@@ -306,7 +310,7 @@ private fun EmptyHistory(modifier: Modifier = Modifier) {
 }
 
 private fun formatBytes(bytes: Long): String {
-    if (bytes < 1024) return "${bytes} B"
+    if (bytes < 1024) return "$bytes B"
     val kb = bytes / 1024.0
     if (kb < 1024) return "${"%.1f".format(kb)} KB"
     val mb = kb / 1024.0

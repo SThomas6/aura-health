@@ -1,3 +1,9 @@
 <resources>
-    <string name="app_name">Aura Health</string>
+    <!--
+      app_name is intentionally not declared here. Each product flavor
+      (demo / production) declares it via `resValue` in
+      app/build.gradle so the launcher label can differ between variants
+      ("Aura Health (Demo)" vs. "Aura Health") while both can be
+      installed side-by-side via the .demo applicationId suffix.
+    -->
 </resources>

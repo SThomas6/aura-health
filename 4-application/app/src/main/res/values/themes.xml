@@ -5,4 +5,25 @@
         <item name="android:navigationBarColor">@android:color/transparent</item>
         <item name="android:statusBarColor">@android:color/transparent</item>
     </style>
+
+    <!--
+        Launch theme used by the Android 12+ Splash Screen API. The
+        launcher hands us this theme for ~300ms of cold start before our
+        Activity's "real" theme takes over; `postSplashScreenTheme`
+        avoids a noticeable flash by specifying the swap target up
+        front. Keeping this in the default values bucket (plus a -night
+        override) means dark-mode wallpapers get the right backdrop
+        without an extra code path in MainActivity.
+
+        The splash icon points at the app launcher PNG so the splash
+        stays visually consistent with the home-screen icon; the user
+        supplied a full-bleed raster icon rather than a vector, so we
+        can't animate it — the splash API treats a non-AVD drawable as
+        a static centered icon, which is exactly what we want here.
+    -->
+    <style name="Theme.AuraHealth.Starting" parent="Theme.SplashScreen">
+        <item name="windowSplashScreenBackground">@color/aura_brand_teal</item>
+        <item name="windowSplashScreenAnimatedIcon">@mipmap/ic_launcher</item>
+        <item name="postSplashScreenTheme">@style/Theme.AuraHealth</item>
+    </style>
 </resources>

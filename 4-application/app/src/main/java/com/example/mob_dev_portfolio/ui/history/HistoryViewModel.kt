@@ -7,6 +7,8 @@ import androidx.lifecycle.viewmodel.CreationExtras
 import com.example.mob_dev_portfolio.AuraApplication
 import com.example.mob_dev_portfolio.data.SymptomLog
 import com.example.mob_dev_portfolio.data.SymptomLogRepository
+import com.example.mob_dev_portfolio.data.condition.HealthCondition
+import com.example.mob_dev_portfolio.data.condition.HealthConditionRepository
 import com.example.mob_dev_portfolio.data.preferences.UiPreferencesRepository
 import com.example.mob_dev_portfolio.ui.log.LogValidator
 import kotlinx.coroutines.ExperimentalCoroutinesApi
@@ -17,6 +19,7 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.debounce
+import kotlinx.coroutines.flow.flowOf
 import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.drop
 import kotlinx.coroutines.flow.first
@@ -31,10 +34,30 @@ data class HistoryUiState(
     val availableTags: List<String> = emptyList(),
 )
 
+/**
+ * Materialised "conditionId → name" map plus the inverse "logId →
+ * condition" so the History composable can render condition headers and
+ * decide which bucket a log belongs to in O(1).
+ */
+data class ConditionGrouping(
+    val conditions: List<HealthCondition>,
+    val byLogId: Map<Long, HealthCondition>,
+) {
+    companion object {
+        val Empty = ConditionGrouping(emptyList(), emptyMap())
+    }
+}
+
 @OptIn(ExperimentalCoroutinesApi::class, FlowPreview::class)
 class HistoryViewModel(
     private val repository: SymptomLogRepository,
     private val preferences: UiPreferencesRepository,
+    /**
+     * Optional so existing test doubles that don't exercise the
+     * conditions feature still compile — when null, the screen renders
+     * without condition section headers.
+     */
+    private val conditionRepository: HealthConditionRepository? = null,
     tagCatalog: List<String>,
 ) : ViewModel() {
 
@@ -52,6 +75,33 @@ class HistoryViewModel(
     val logs: StateFlow<List<SymptomLog>> = _filter
         .flatMapLatest { filter -> repository.observeFiltered(filter) }
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000L), emptyList())
+
+    /**
+     * Live map of declared conditions + the per-log mapping the screen
+     * needs to render its grouped section headers. Resolved by joining
+     * the conditions list with the (logId → conditionId) link table —
+     * doing it here means the screen renders deterministically without
+     * any Flow combine logic of its own.
+     */
+    val conditionGrouping: StateFlow<ConditionGrouping> =
+        if (conditionRepository == null) {
+            flowOf(ConditionGrouping.Empty)
+        } else {
+            combine(
+                conditionRepository.observeAll(),
+                conditionRepository.observeAllLinks(),
+            ) { conditions, links ->
+                if (conditions.isEmpty() || links.isEmpty()) {
+                    ConditionGrouping(conditions = conditions, byLogId = emptyMap())
+                } else {
+                    val byId = conditions.associateBy { it.id }
+                    val byLog = links.mapNotNull { link ->
+                        byId[link.conditionId]?.let { link.logId to it }
+                    }.toMap()
+                    ConditionGrouping(conditions = conditions, byLogId = byLog)
+                }
+            }
+        }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000L), ConditionGrouping.Empty)
 
     init {
         viewModelScope.launch {
@@ -121,6 +171,7 @@ class HistoryViewModel(
                 return HistoryViewModel(
                     repository = app.container.symptomLogRepository,
                     preferences = app.container.uiPreferencesRepository,
+                    conditionRepository = app.container.healthConditionRepository,
                     tagCatalog = com.example.mob_dev_portfolio.data.ContextTagCatalog.tags,
                 ) as T
             }

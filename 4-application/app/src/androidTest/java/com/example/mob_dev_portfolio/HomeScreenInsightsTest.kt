@@ -61,6 +61,9 @@ class HomeScreenInsightsTest {
                     onViewHistoryClick = {},
                     onOpenLog = {},
                     onGenerateReport = {},
+                    onOpenTrends = {},
+                    onOpenSettings = {},
+                    onOpenHealthMetric = {},
                     viewModel = vm,
                 )
             }
@@ -93,6 +96,9 @@ class HomeScreenInsightsTest {
                     onViewHistoryClick = {},
                     onOpenLog = {},
                     onGenerateReport = {},
+                    onOpenTrends = {},
+                    onOpenSettings = {},
+                    onOpenHealthMetric = {},
                     viewModel = vm,
                 )
             }

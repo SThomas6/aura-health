@@ -48,6 +48,8 @@ import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewmodel.compose.viewModel
 import com.example.mob_dev_portfolio.data.ai.AnalysisRun
+import com.example.mob_dev_portfolio.data.ai.AnalysisSummaryFormatter
+import com.example.mob_dev_portfolio.data.ai.AnalysisSummaryFormatter.SeverityTier
 import com.example.mob_dev_portfolio.ui.components.auraHeroGradient
 import com.example.mob_dev_portfolio.ui.theme.AuraMonoFamily
 import java.time.Instant
@@ -227,6 +229,17 @@ private fun LoadedContent(
     ) {
         GuidanceHero(run = run)
         SummaryCard(run = run)
+        // Always render the NHS disclaimer — the model is prompted to
+        // emit an `NHS_REFERENCE:` marker but we can't rely on it being
+        // present (older runs predate the instruction, and the model
+        // occasionally drops it). Showing our own copy guarantees the
+        // "check NHS for full symptoms" guidance is surfaced every time
+        // the user reads an analysis, regardless of what Gemini emits.
+        NhsReferenceCard()
+        // Surface which Health Connect metrics were actually
+        // incorporated into this run so the user can see at a glance
+        // whether the AI took their activity/sleep/vitals into account.
+        HealthDataConsideredCard(metrics = run.healthMetricsShortLabels)
         // Quick jump to the PDF report — the analysis detail is a
         // natural "share with my doctor" moment, so surfacing the
         // report entry point here saves a trip back to Home.
@@ -250,19 +263,47 @@ private fun LoadedContent(
  * history list so the two surfaces feel like one object opening up,
  * and the timestamp uses the mono family reserved for quantitative
  * readouts (matches the row on the history screen).
+ *
+ * The background colour reflects the severity tier of the result:
+ *   - AllClear (green-leaning) → the usual mint hero gradient
+ *   - Watch    (amber) → an amber wash telling the user there's
+ *     something worth raising with a clinician
+ *   - Urgent   (red) → a red wash when the summary contains 999 /
+ *     A&E / "life-threatening" style language
+ *
+ * The hero was previously a fixed gradient regardless of outcome; the
+ * user asked for a stronger at-a-glance cue here because the headline
+ * alone was easy to gloss over.
  */
 @Composable
 private fun GuidanceHero(run: AnalysisRun) {
     val completed = Instant.ofEpochMilli(run.completedAtEpochMillis)
         .atZone(ZoneId.systemDefault())
         .toLocalDateTime()
+    val tier = AnalysisSummaryFormatter.severityTier(run.guidance, run.summaryText)
+    // Pick a solid semantic colour for Watch/Urgent; keep the gradient
+    // for AllClear because green is already its visual language.
+    // Chosen to read well over the white foreground content already
+    // in the hero — changing text colours would ripple into pill styling
+    // and testTag-based assertions, which isn't worth the blast radius.
+    val heroModifier = Modifier
+        .fillMaxWidth()
+        .clip(RoundedCornerShape(28.dp))
+        .let { base ->
+            when (tier) {
+                SeverityTier.AllClear -> base.background(auraHeroGradient())
+                // Warm amber — reads clearly as "worth a look" on both
+                // light and dark themes without being alarming.
+                SeverityTier.Watch -> base.background(Color(0xFFB5651D))
+                // Material error-red: unambiguous stop-signal for runs
+                // where Gemini flagged potentially urgent patterns.
+                SeverityTier.Urgent -> base.background(Color(0xFFB00020))
+            }
+        }
+        .padding(20.dp)
+        .testTag("analysis_detail_hero")
     Box(
-        modifier = Modifier
-            .fillMaxWidth()
-            .clip(RoundedCornerShape(28.dp))
-            .background(auraHeroGradient())
-            .padding(20.dp)
-            .testTag("analysis_detail_hero"),
+        modifier = heroModifier,
     ) {
         Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
             Row(verticalAlignment = Alignment.CenterVertically) {
@@ -330,10 +371,117 @@ private fun SummaryCard(run: AnalysisRun) {
                 style = MaterialTheme.typography.titleMedium,
                 fontWeight = FontWeight.SemiBold,
             )
+            // Strip the internal `GUIDANCE:` / `NHS_REFERENCE:` markers
+            // before rendering — those are classifier hints for our own
+            // pipeline, not content the user should see inline. The pill
+            // and the dedicated NHS card below replay them in a tidier
+            // form.
             MarkdownContent(
-                text = run.summaryText,
+                text = AnalysisSummaryFormatter.stripInternalMarkers(run.summaryText),
                 modifier = Modifier.testTag("analysis_detail_summary"),
             )
+        }
+    }
+}
+
+/**
+ * Persistent disclaimer pointing the user at the NHS symptom checker.
+ *
+ * The Gemini prompt now instructs the model to name *possible*
+ * life-threatening conditions (cancers, cardiac events, sepsis, etc.)
+ * where the pattern fits — that is clinically useful but can also
+ * alarm someone reading their own logs without context. Tethering
+ * every analysis to the NHS "check full symptoms" entry point gives
+ * the user an authoritative next step and nudges them away from
+ * treating the AI output as a standalone diagnosis.
+ *
+ * Rendered as a distinct card (rather than inline in the summary) so
+ * it is impossible to miss and identical across every run.
+ */
+@Composable
+private fun NhsReferenceCard() {
+    Card(
+        colors = CardDefaults.cardColors(
+            containerColor = MaterialTheme.colorScheme.tertiaryContainer,
+            contentColor = MaterialTheme.colorScheme.onTertiaryContainer,
+        ),
+        shape = RoundedCornerShape(16.dp),
+        modifier = Modifier
+            .fillMaxWidth()
+            .testTag("analysis_detail_nhs_card"),
+    ) {
+        Column(
+            modifier = Modifier.padding(16.dp),
+            verticalArrangement = Arrangement.spacedBy(6.dp),
+        ) {
+            Text(
+                "Check the NHS for full symptom information",
+                style = MaterialTheme.typography.titleSmall,
+                fontWeight = FontWeight.SemiBold,
+            )
+            Text(
+                "This analysis is not a diagnosis. For any condition named above, or if anything you're feeling worries you, look up the full symptom list at www.nhs.uk. Call 111 for urgent-but-not-emergency advice, or 999 if symptoms are severe or life-threatening.",
+                style = MaterialTheme.typography.bodySmall,
+            )
+        }
+    }
+}
+
+/**
+ * Card listing the Health Connect metrics that contributed data to this
+ * run. The list is persisted at analysis time (see
+ * [com.example.mob_dev_portfolio.data.ai.AnalysisRunEntity.healthMetricsCsv])
+ * so re-opening an older run still shows what was considered, without
+ * re-querying Health Connect (grants may have changed since).
+ *
+ * Three visual states:
+ *
+ *   - `null` metrics — pre-Health-Connect-integration run. We render a
+ *     neutral "no health data" note rather than hide the card, so the
+ *     user can see what *wasn't* considered without confusion.
+ *   - Empty list — integration active but nothing readable (toggles all
+ *     off, or no records in the window).
+ *   - Non-empty list — chip row with the short labels.
+ */
+@Composable
+private fun HealthDataConsideredCard(metrics: List<String>?) {
+    Card(
+        colors = CardDefaults.cardColors(
+            containerColor = MaterialTheme.colorScheme.surface,
+            contentColor = MaterialTheme.colorScheme.onSurface,
+        ),
+        shape = RoundedCornerShape(16.dp),
+        modifier = Modifier
+            .fillMaxWidth()
+            .testTag("analysis_detail_health_card"),
+    ) {
+        Column(
+            modifier = Modifier.padding(16.dp),
+            verticalArrangement = Arrangement.spacedBy(8.dp),
+        ) {
+            Text(
+                "Health data considered",
+                style = MaterialTheme.typography.titleSmall,
+                fontWeight = FontWeight.SemiBold,
+            )
+            when {
+                metrics == null -> Text(
+                    "No Health Connect data was considered for this run.",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+                metrics.isEmpty() -> Text(
+                    "Health Connect was enabled, but no metrics had readable data in the relevant time windows.",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+                else -> Text(
+                    text = metrics.joinToString(" · "),
+                    style = MaterialTheme.typography.bodyMedium,
+                    fontFamily = AuraMonoFamily,
+                    modifier = Modifier.testTag("analysis_detail_health_chips"),
+                )
+            }
         }
     }
 }

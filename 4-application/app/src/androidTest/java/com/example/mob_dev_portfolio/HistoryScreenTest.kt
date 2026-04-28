@@ -65,7 +65,7 @@ class HistoryScreenTest {
     @Test
     fun empty_state_renders_when_no_logs() {
         val vm = buildVm(emptyList())
-        composeRule.setContent { AuraTheme { HistoryScreen(onOpenLog = {}, viewModel = vm) } }
+        composeRule.setContent { AuraTheme { HistoryScreen(onOpenLog = {}, onAddSymptom = {}, viewModel = vm) } }
 
         composeRule.onNodeWithTag("history_empty").assertIsDisplayed()
     }
@@ -78,7 +78,7 @@ class HistoryScreenTest {
                 log(2, "Nausea", 6),
             ),
         )
-        composeRule.setContent { AuraTheme { HistoryScreen(onOpenLog = {}, viewModel = vm) } }
+        composeRule.setContent { AuraTheme { HistoryScreen(onOpenLog = {}, onAddSymptom = {}, viewModel = vm) } }
 
         composeRule.onNodeWithTag("history_row_1").assertIsDisplayed()
         composeRule.onNodeWithTag("history_row_2").assertIsDisplayed()
@@ -95,7 +95,7 @@ class HistoryScreenTest {
     @Test
     fun opening_filter_sheet_reveals_sort_options() {
         val vm = buildVm(listOf(log(1, "Headache", 4)))
-        composeRule.setContent { AuraTheme { HistoryScreen(onOpenLog = {}, viewModel = vm) } }
+        composeRule.setContent { AuraTheme { HistoryScreen(onOpenLog = {}, onAddSymptom = {}, viewModel = vm) } }
 
         composeRule.onNodeWithTag("btn_open_filters").performClick()
 
@@ -107,7 +107,7 @@ class HistoryScreenTest {
     @Test
     fun active_filter_chip_row_appears_when_query_present() {
         val vm = buildVm(listOf(log(1, "Headache", 4)))
-        composeRule.setContent { AuraTheme { HistoryScreen(onOpenLog = {}, viewModel = vm) } }
+        composeRule.setContent { AuraTheme { HistoryScreen(onOpenLog = {}, onAddSymptom = {}, viewModel = vm) } }
 
         composeRule.onNodeWithTag("history_search").performTextInput("head")
 

@@ -104,4 +104,7 @@ private class FakeDao : com.example.mob_dev_portfolio.data.SymptomLogDao {
     override fun observeById(id: Long) = MutableStateFlow<com.example.mob_dev_portfolio.data.SymptomLogEntity?>(null).asStateFlow()
     override fun observeCount() = MutableStateFlow(0).asStateFlow()
     override suspend fun delete(id: Long) = Unit
+    override suspend fun listChronologicalAsc(): List<com.example.mob_dev_portfolio.data.SymptomLogEntity> = emptyList()
+    override suspend fun totalCount(): Int = 0
+    override suspend fun averageSeverity(): Double? = null
 }

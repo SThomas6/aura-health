@@ -2,9 +2,9 @@ package com.example.mob_dev_portfolio.ui.navigation
 
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ListAlt
-import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.AutoAwesome
 import androidx.compose.material.icons.filled.Home
+import androidx.compose.material.icons.filled.MedicalServices
 import androidx.compose.ui.graphics.vector.ImageVector
 import kotlinx.serialization.Serializable
 
@@ -12,11 +12,19 @@ sealed interface TopLevelRoute {
     @Serializable
     data object Home : TopLevelRoute
     @Serializable
-    data object Log : TopLevelRoute
-    @Serializable
     data object History : TopLevelRoute
     @Serializable
     data object Analysis : TopLevelRoute
+
+    /**
+     * The Doctor Visits tab. Lists every logged visit with a tap-through
+     * to the detail (cleared logs + diagnoses) and a FAB to add a new
+     * one. Promoted to a top-level destination because the feature
+     * feeds the AI pipeline's filtering/annotation behaviour and users
+     * should be able to manage it without drilling through Settings.
+     */
+    @Serializable
+    data object Doctor : TopLevelRoute
 }
 
 @Serializable
@@ -24,6 +32,18 @@ data class DetailRoute(val id: Long)
 
 @Serializable
 data class EditLogRoute(val id: Long)
+
+/**
+ * Route for the "add a new symptom" form. Previously a top-level
+ * destination in the bottom nav; promoted out of the tab row in favour
+ * of a FAB on the Symptoms (nee History) screen so the nav surface
+ * stays focused on destinations the user browses rather than actions
+ * they perform. Adding happens from Symptoms; the form itself is a
+ * transient, one-off destination reached via the FAB and from Home's
+ * hero "Log" button.
+ */
+@Serializable
+data object LogSymptomRoute
 
 /**
  * Route for the AI Analysis *run-the-pipeline* screen — the form with
@@ -53,6 +73,17 @@ data class AnalysisDetailRoute(val runId: Long)
 data object HealthReportRoute
 
 /**
+ * Route for the Trend Visualisation dashboard — a single-page chart
+ * surface plotting symptom-severity time-series with an optional
+ * environmental overlay (humidity / temperature / pressure / AQI).
+ * Reached from a Home quick-action card; one screen-deep from the
+ * launch destination keeps the "<= 2 taps from home" acceptance
+ * criterion satisfied.
+ */
+@Serializable
+data object TrendVisualisationRoute
+
+/**
  * Route for the list of previously generated PDF reports. Reached from
  * the Health Report screen's action bar; each row opens/shares/deletes
  * the archive backed by a row in `report_archives` + a compressed
@@ -60,6 +91,86 @@ data object HealthReportRoute
  */
 @Serializable
 data object HealthReportHistoryRoute
+
+/**
+ * Route for the Health Connect integration settings — per-metric
+ * toggles, "Install Health Connect" CTA, "Disconnect" action.
+ * Reached from Home (Settings card) and from the
+ * Health-Connect permissions-rationale system intent.
+ */
+@Serializable
+data object HealthDataSettingsRoute
+
+/**
+ * Route for the demographic profile editor (date of birth + biological
+ * sex). Reached from Settings. Name editing still lives on the Analysis
+ * screen for now — this screen covers the two fields the Gemini prompt
+ * reads outside of symptom logs.
+ */
+@Serializable
+data object DemographicProfileRoute
+
+/**
+ * Route for the Settings landing page — a single entry point that
+ * consolidates "Appearance", "Demographic profile" and "Health data
+ * integration" so Home can focus on the daily-check-in flow. Added
+ * after user feedback that those cards felt out of place cluttering
+ * the Home screen.
+ */
+@Serializable
+data object SettingsRoute
+
+/**
+ * Route for the user-declared health conditions screen. Lists conditions
+ * (e.g. "Type 2 Diabetes"), lets the user add/edit/delete, and feeds the
+ * AI's already-explained context bundle. Reachable from Settings and
+ * from the onboarding flow.
+ */
+@Serializable
+data object HealthConditionsRoute
+
+/**
+ * Route for the fullscreen Health Connect metric detail screen. The
+ * [metricStorageKey] is the stable
+ * [com.example.mob_dev_portfolio.data.health.HealthConnectMetric.storageKey]
+ * — not the enum name — so a later rename doesn't invalidate back-stack
+ * state or deep links.
+ */
+@Serializable
+data class HealthMetricDetailRoute(val metricStorageKey: String)
+
+/**
+ * Route for the medication-reminders list (FR-MR-02) — every active
+ * reminder ordered by next-fire time, with a 30-day dose-history feed
+ * underneath (FR-MR-06). Reached from a Home quick-action card.
+ */
+@Serializable
+data object MedicationListRoute
+
+/**
+ * Route for the medication-reminder create/edit form (FR-MR-01, FR-MR-04).
+ * A null [id] means "create"; any non-null id loads the existing
+ * reminder for editing.
+ */
+@Serializable
+data class MedicationEditorRoute(val id: Long? = null)
+
+/**
+ * Route for the read-only "visit detail" view — shows the doctor's
+ * summary, any logs the user has marked as reviewed, and any
+ * diagnoses (each with its linked symptoms). Reached from the
+ * Doctor-Visits list.
+ */
+@Serializable
+data class DoctorVisitDetailRoute(val id: Long)
+
+/**
+ * Route for the doctor-visit create/edit form. A null [id] means
+ * "create"; any non-null id loads the existing visit (summary,
+ * covered-log selection, diagnoses + linked logs) for editing.
+ */
+@Serializable
+data class DoctorVisitEditorRoute(val id: Long? = null)
 
 data class TopLevelDestination(
     val route: TopLevelRoute,
@@ -70,7 +181,7 @@ data class TopLevelDestination(
 
 val TopLevelDestinations: List<TopLevelDestination> = listOf(
     TopLevelDestination(TopLevelRoute.Home, "Home", Icons.Filled.Home, TopLevelRoute.Home::class.qualifiedName.orEmpty()),
-    TopLevelDestination(TopLevelRoute.Log, "Log", Icons.Filled.Add, TopLevelRoute.Log::class.qualifiedName.orEmpty()),
-    TopLevelDestination(TopLevelRoute.History, "History", Icons.AutoMirrored.Filled.ListAlt, TopLevelRoute.History::class.qualifiedName.orEmpty()),
+    TopLevelDestination(TopLevelRoute.History, "Symptoms", Icons.AutoMirrored.Filled.ListAlt, TopLevelRoute.History::class.qualifiedName.orEmpty()),
+    TopLevelDestination(TopLevelRoute.Doctor, "Doctor", Icons.Filled.MedicalServices, TopLevelRoute.Doctor::class.qualifiedName.orEmpty()),
     TopLevelDestination(TopLevelRoute.Analysis, "Analyse", Icons.Filled.AutoAwesome, TopLevelRoute.Analysis::class.qualifiedName.orEmpty()),
 )

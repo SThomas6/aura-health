@@ -72,6 +72,6 @@ enum class AnalysisGuidance(val headline: String, val bodyHint: String) {
          * colour; mirroring that threshold here keeps the notification's
          * copy aligned with what the user has already seen in-app.
          */
-        const val SEVERITY_WATERSHED: Int = 7
+        private const val SEVERITY_WATERSHED: Int = 7
     }
 }

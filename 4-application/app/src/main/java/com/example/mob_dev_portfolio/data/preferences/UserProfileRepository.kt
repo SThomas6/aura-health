@@ -9,6 +9,26 @@ import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.map
 
 /**
+ * Coarse biological-sex bucket fed into the Gemini prompt alongside the
+ * age range. Kept deliberately small so it maps cleanly onto the analysis
+ * prompt without exposing free-text self-description. A user who prefers
+ * not to say picks [PreferNotToSay]; the prompt drops the field entirely
+ * rather than sending "prefer not to say", which the model sometimes
+ * echoes back in its response.
+ */
+enum class BiologicalSex(val storageKey: String, val displayLabel: String) {
+    Female(storageKey = "female", displayLabel = "Female"),
+    Male(storageKey = "male", displayLabel = "Male"),
+    Intersex(storageKey = "intersex", displayLabel = "Intersex"),
+    PreferNotToSay(storageKey = "prefer_not_to_say", displayLabel = "Prefer not to say");
+
+    companion object {
+        fun fromStorageKey(key: String?): BiologicalSex? =
+            entries.firstOrNull { it.storageKey == key }
+    }
+}
+
+/**
  * The user's self-reported identity details. Held locally; **never** sent to
  * the Gemini API in this raw form — see `AnalysisSanitizer`, which strips
  * names and replaces DOB with an age bucket before any network call.
@@ -19,6 +39,13 @@ import kotlinx.coroutines.flow.map
 data class UserProfile(
     val fullName: String? = null,
     val dateOfBirthEpochMillis: Long? = null,
+    /**
+     * Coarse self-reported biological sex. Nullable so a fresh install
+     * surfaces the setup flow, and [BiologicalSex.PreferNotToSay] distinct
+     * from null so a user's explicit "don't use this" is remembered and
+     * isn't re-asked every session.
+     */
+    val biologicalSex: BiologicalSex? = null,
 )
 
 open class UserProfileRepository(
@@ -29,6 +56,7 @@ open class UserProfileRepository(
         UserProfile(
             fullName = prefs[FULL_NAME]?.takeIf { it.isNotBlank() },
             dateOfBirthEpochMillis = prefs[DOB_MILLIS],
+            biologicalSex = BiologicalSex.fromStorageKey(prefs[BIOLOGICAL_SEX]),
         )
     }
 
@@ -47,8 +75,16 @@ open class UserProfileRepository(
         }
     }
 
+    open suspend fun setBiologicalSex(sex: BiologicalSex?) {
+        dataStore.edit { editor ->
+            if (sex == null) editor.remove(BIOLOGICAL_SEX)
+            else editor[BIOLOGICAL_SEX] = sex.storageKey
+        }
+    }
+
     companion object {
         private val FULL_NAME = stringPreferencesKey("user_full_name")
         private val DOB_MILLIS = longPreferencesKey("user_dob_millis")
+        private val BIOLOGICAL_SEX = stringPreferencesKey("user_biological_sex")
     }
 }

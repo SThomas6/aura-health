@@ -7,4 +7,14 @@
     <color name="teal_700">#FF018786</color>
     <color name="black">#FF000000</color>
     <color name="white">#FFFFFFFF</color>
+
+    <!--
+        Aura brand palette, used by the Android-12 splash-screen theme.
+        The teal matches the hero-card gradient primary on Home; the
+        dark variant (for `values-night`) drops luminance rather than
+        hue so the splash panel still reads behind the raster icon on
+        OLED wallpapers.
+    -->
+    <color name="aura_brand_teal">#0F6E6E</color>
+    <color name="aura_brand_teal_dark">#0A4A4A</color>
 </resources>
