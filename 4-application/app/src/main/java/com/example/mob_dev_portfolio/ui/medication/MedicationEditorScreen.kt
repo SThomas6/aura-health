@@ -248,7 +248,6 @@ fun MedicationEditorScreen(
     }
 }
 
-@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 private fun FrequencySection(
     state: MedicationEditorUiState,
@@ -310,7 +309,7 @@ private val FrequencyKind.label: String
         FrequencyKind.OneOff -> "One-off"
     }
 
-@OptIn(ExperimentalMaterial3Api::class, androidx.compose.foundation.layout.ExperimentalLayoutApi::class)
+@OptIn(androidx.compose.foundation.layout.ExperimentalLayoutApi::class)
 @Composable
 private fun WeekdayChips(mask: Int, onToggle: (Int) -> Unit) {
     val days = listOf(

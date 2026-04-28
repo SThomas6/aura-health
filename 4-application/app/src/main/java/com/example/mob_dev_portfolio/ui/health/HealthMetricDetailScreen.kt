@@ -99,7 +99,6 @@ fun HealthMetricDetailScreen(
     }
 }
 
-@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 private fun RangeToggle(
     selected: HealthHistoryRepository.Range,

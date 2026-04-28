@@ -65,7 +65,7 @@ class LogDetailViewModel(
 ) : ViewModel() {
 
     val log: StateFlow<DetailLogState> = repository.observeById(id)
-        .map<SymptomLog?, DetailLogState> { loaded ->
+        .map { loaded ->
             if (loaded == null) DetailLogState.NotFound else DetailLogState.Loaded(loaded)
         }
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000L), DetailLogState.Loading)

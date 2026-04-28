@@ -141,14 +141,14 @@ fun OnboardingScreen(
     // flow with perms already granted sees "Granted" chips rather than
     // fresh "Allow" buttons.
     LaunchedEffect(Unit) {
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
-            notificationsGranted = ContextCompat.checkSelfPermission(
+        notificationsGranted = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+            ContextCompat.checkSelfPermission(
                 context,
                 Manifest.permission.POST_NOTIFICATIONS,
             ) == PackageManager.PERMISSION_GRANTED
         } else {
             // Pre-API-33 the manifest entry is enough — skip the prompt.
-            notificationsGranted = true
+            true
         }
         locationGranted = ContextCompat.checkSelfPermission(
             context,

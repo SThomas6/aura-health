@@ -526,7 +526,7 @@ class LogSymptomViewModel(
                         draft.attachLocation && finalWarning != null -> "Log saved — $finalWarning"
                         else -> "Log saved"
                     },
-                    transientError = if (finalWarning != null) finalWarning else it.transientError,
+                    transientError = finalWarning ?: it.transientError,
                 )
             }
             onSaved()
@@ -578,7 +578,7 @@ class LogSymptomViewModel(
         }
         return when {
             failureCount == 0 -> null
-            successCount == 0 -> "Couldn't attach ${failureCount} photo${if (failureCount == 1) "" else "s"}."
+            successCount == 0 -> "Couldn't attach $failureCount photo${if (failureCount == 1) "" else "s"}."
             else -> "Attached $successCount of ${successCount + failureCount} photos — the rest couldn't be processed."
         }
     }

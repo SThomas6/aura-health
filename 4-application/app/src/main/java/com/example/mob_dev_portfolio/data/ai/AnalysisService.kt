@@ -217,7 +217,7 @@ open class AnalysisService(
     private fun HealthSnapshot.asSummaryOrNull(): AnalysisRequest.HealthSummary? {
         if (isEmpty) return null
         val sevenDay = aggregate7Day.toLabelMap()
-        val body = buildMap<String, String> {
+        val body = buildMap {
             latestHeightMeters?.let { put("Height", "%.2f m".format(Locale.US, it)) }
             latestWeightKg?.let { put("Weight", "%.1f kg".format(Locale.US, it)) }
             latestBodyFatPercent?.let { put("Body fat", "%.1f %%".format(Locale.US, it)) }

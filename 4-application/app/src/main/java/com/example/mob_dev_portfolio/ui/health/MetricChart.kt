@@ -224,6 +224,13 @@ fun MetricChart(
             val leftGutterPx = if (showAxis) AXIS_LEFT_GUTTER_PX else 0f
             val rightPadPx = if (showAxis) AXIS_RIGHT_PAD_PX else 0f
             val bottomStripPx = if (showAxis) AXIS_BOTTOM_STRIP_PX else 0f
+            // `plotLeft` carries different intent from the gutter width
+            // (one is "where the plot starts", the other is "how wide
+            // the left gutter is"); keeping the alias makes the
+            // downstream geometry maths read in plot-coordinates rather
+            // than gutter-arithmetic. Lint can't tell the difference
+            // between value and intent — the @Suppress is targeted.
+            @Suppress("UnnecessaryVariable")
             val plotLeft = leftGutterPx
             val plotRight = canvasWidth - rightPadPx
             val plotTop = 0f
@@ -448,6 +455,9 @@ private fun bucketIndexAt(
     style: ChartStyle,
 ): Int? {
     if (bucketCount <= 0) return null
+    // Same naming-vs-value rationale as in [Chart] — see the kdoc-style
+    // comment there for why the alias survives the lint hint.
+    @Suppress("UnnecessaryVariable")
     val plotLeft = leftGutterPx
     val plotRight = canvasWidth - rightPadPx
     val plotWidth = (plotRight - plotLeft).coerceAtLeast(1f)

@@ -81,7 +81,6 @@ import java.util.Locale
 // already exists on `SymptomLog` and `HomeInsights` — no backend changes.
 // ──────────────────────────────────────────────────────────────────────
 
-@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun HomeScreen(
     onLogSymptomClick: () -> Unit,
@@ -554,6 +553,10 @@ private fun TrendChart(
         val count = trend.size.coerceAtLeast(1)
         val totalGap = gapPx * (count - 1)
         val barWidth = ((canvasWidth - totalGap) / count).coerceAtLeast(2f)
+        // Same numeric value as `strokePx` but documents intent — bars
+        // are inset by one stroke-width from the top so the rounded
+        // top edges aren't clipped by the canvas bounds.
+        @Suppress("UnnecessaryVariable")
         val topInset = strokePx
         val plotHeight = canvasHeight - topInset
 

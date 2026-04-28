@@ -76,15 +76,14 @@ open class HealthPreferencesRepository(
     }
 
     open val enabledMetrics: Flow<Set<HealthConnectMetric>> = dataStore.data.map { prefs ->
-        val stored = prefs[ENABLED_METRICS]
-        if (stored == null) {
-            // First-ever read — use the catalogue's default set. We don't
-            // persist on read, so toggling one off on first run writes the
-            // full delta and locks in their intent without a double emission.
-            HealthConnectMetric.DefaultEnabled
-        } else {
-            stored.mapNotNull { HealthConnectMetric.fromStorageKey(it) }.toSet()
-        }
+        // First-ever read returns null → use the catalogue's default set.
+        // We don't persist on read, so toggling one off on first run
+        // writes the full delta and locks in the user's intent without
+        // a double emission.
+        prefs[ENABLED_METRICS]
+            ?.mapNotNull { HealthConnectMetric.fromStorageKey(it) }
+            ?.toSet()
+            ?: HealthConnectMetric.DefaultEnabled
     }
 
     open suspend fun setIntegrationEnabled(enabled: Boolean) {

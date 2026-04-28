@@ -275,7 +275,6 @@ fun HistoryScreen(
     }
 }
 
-@OptIn(ExperimentalMaterial3Api::class)
 /**
  * Section header for the Ongoing / Ended split in the history list.
  *
@@ -620,7 +619,6 @@ private fun FilterSection(title: String, content: @Composable () -> Unit) {
     }
 }
 
-@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 private fun SeverityRangeControl(
     min: Int,

@@ -184,7 +184,6 @@ fun SettingsScreen(
  * Extracted here so the previous Home copy can be deleted; the segmented
  * button ids + testTags are preserved so existing UI tests keep working.
  */
-@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 private fun AppearanceCard(current: ThemeMode, onSelect: (ThemeMode) -> Unit) {
     val options = listOf(

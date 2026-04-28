@@ -38,7 +38,6 @@ class DoctorVisitDetailViewModel(
     symptomLogRepository: SymptomLogRepository,
 ) : ViewModel() {
 
-    @OptIn(ExperimentalCoroutinesApi::class)
     val state: StateFlow<DoctorVisitDetailUiState> = combine(
         repository.observeVisitDetail(visitId),
         symptomLogRepository.observeAll(),

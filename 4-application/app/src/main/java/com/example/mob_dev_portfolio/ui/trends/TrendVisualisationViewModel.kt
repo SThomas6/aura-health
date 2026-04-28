@@ -596,7 +596,7 @@ class TrendVisualisationViewModel(
         val axisStartMillis = axis.bucketStarts.firstOrNull()?.toEpochMilli() ?: Long.MIN_VALUE
         val axisEndMillis = axis.bucketEnds.lastOrNull()?.toEpochMilli() ?: Long.MAX_VALUE
 
-        val records = buildList<Pair<Long, Double>> {
+        val records = buildList {
             filtered.forEach { log ->
                 val sev = log.severity.toDouble()
                 val startMs = log.startEpochMillis

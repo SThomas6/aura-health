@@ -56,7 +56,7 @@ object AnalysisSummaryFormatter {
      * emit verbatim — used as a fallback when we want to render the
      * disclaimer ourselves, regardless of whether the model complied.
      */
-    val NHS_DISCLAIMER: String =
+    const val NHS_DISCLAIMER: String =
         "This is not a medical diagnosis. For full symptom information on any condition mentioned above, check the NHS website at $NHS_REFERENCE_URL."
 
     // Urgency keywords the prompt asks the model to use when the pattern

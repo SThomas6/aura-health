@@ -4,15 +4,19 @@ import android.content.Context
 import android.graphics.Bitmap
 import android.graphics.BitmapFactory
 import android.graphics.Canvas
-import android.graphics.Color
 import android.graphics.Paint
+import android.graphics.Path
 import android.graphics.Rect
 import android.graphics.RectF
 import android.graphics.Typeface
 import android.graphics.pdf.PdfDocument
+import android.util.Log
 import android.text.Layout
 import android.text.StaticLayout
 import android.text.TextPaint
+import androidx.core.graphics.createBitmap
+import androidx.core.graphics.toColorInt
+import androidx.core.graphics.withClip
 import com.example.mob_dev_portfolio.data.ai.AnalysisSummaryFormatter
 import java.io.BufferedInputStream
 import java.io.BufferedOutputStream
@@ -354,7 +358,7 @@ class HealthReportPdfGenerator(
                     // crash-triggering log than lose the whole report.
                     runCatching { drawLogEntry(log) }
                         .onFailure { err ->
-                            android.util.Log.w(
+                            Log.w(
                                 "PdfGen",
                                 "Skipped log id=${log.id} after draw failure",
                                 err,
@@ -627,11 +631,9 @@ class HealthReportPdfGenerator(
 
                 val bitmap = decodePhotoThumbnail(jpegBytes, tileWidth.toInt(), tileHeight.toInt())
                 if (bitmap != null) {
-                    val clipPath = android.graphics.Path().apply {
-                        addRoundRect(rect, 6f, 6f, android.graphics.Path.Direction.CW)
+                    val clipPath = Path().apply {
+                        addRoundRect(rect, 6f, 6f, Path.Direction.CW)
                     }
-                    canvas.save()
-                    canvas.clipPath(clipPath)
                     // Aspect-preserving centre crop into the tile rect.
                     val srcW = bitmap.width
                     val srcH = bitmap.height
@@ -646,8 +648,13 @@ class HealthReportPdfGenerator(
                         val y0 = (srcH - cropH) / 2
                         Rect(0, y0, srcW, y0 + cropH)
                     }
-                    canvas.drawBitmap(bitmap, src, rect, null)
-                    canvas.restore()
+                    // KTX [Canvas.withClip] handles save / clipPath /
+                    // restore as a scoped block — same semantics as the
+                    // manual save/restore pattern with one fewer way to
+                    // accidentally leak canvas state.
+                    canvas.withClip(clipPath) {
+                        drawBitmap(bitmap, src, rect, null)
+                    }
                     // Defer recycling until the page is finished — see
                     // [bitmapsPendingRecycle] for the SIGSEGV root cause.
                     bitmapsPendingRecycle += bitmap
@@ -961,7 +968,7 @@ class HealthReportPdfGenerator(
             height: Int,
         ) {
             val canvas = currentCanvas ?: return
-            val bitmap = Bitmap.createBitmap(width, height, Bitmap.Config.ARGB_8888)
+            val bitmap = createBitmap(width, height)
             val offscreen = Canvas(bitmap)
             layout.draw(offscreen)
             canvas.drawBitmap(bitmap, marginX, currentY, null)
@@ -995,7 +1002,7 @@ class HealthReportPdfGenerator(
             val ascent = -fm.ascent
             val descent = fm.descent
             val bmpHeight = (ascent + descent).toInt().coerceAtLeast(1)
-            val bitmap = Bitmap.createBitmap(measuredWidth, bmpHeight, Bitmap.Config.ARGB_8888)
+            val bitmap = createBitmap(measuredWidth, bmpHeight)
             val offscreen = Canvas(bitmap)
             offscreen.drawText(text, 0f, ascent, paint)
             canvas.drawBitmap(bitmap, x, baselineY - ascent, null)
@@ -1011,9 +1018,9 @@ class HealthReportPdfGenerator(
         // talking to `android.graphics.Paint`.
         val s = severity.coerceIn(1, 10)
         return when {
-            s <= 3 -> Color.parseColor("#D7F4E4")
-            s <= 6 -> Color.parseColor("#FFE8BF")
-            else -> Color.parseColor("#FADAD1")
+            s <= 3 -> "#D7F4E4".toColorInt()
+            s <= 6 -> "#FFE8BF".toColorInt()
+            else -> "#FADAD1".toColorInt()
         }
     }
 
@@ -1046,7 +1053,7 @@ class HealthReportPdfGenerator(
         while (i < source.length) {
             val ch = source[i]
             val code = ch.code
-            val keep: Char? = when {
+            val keep: Char = when {
                 // Tab / newline survive.
                 ch == '\n' || ch == '\t' -> ch
                 // C0 / DEL control range — replace with space.
@@ -1076,21 +1083,23 @@ class HealthReportPdfGenerator(
                 ch.isLowSurrogate() -> ' '
                 else -> ch
             }
-            if (keep != null) {
-                if (keep == '\n' || keep == ' ' || keep == '\t') {
-                    runLength = 0
-                } else {
-                    runLength += 1
-                }
-                // Break pathologically long unbreakable runs by
-                // inserting a soft space. 80 chars is well above any
-                // natural word length but well under what would wrap.
-                if (runLength > MAX_UNBREAKABLE_RUN) {
-                    sb.append(' ')
-                    runLength = 0
-                }
-                sb.append(keep)
+            // [keep] is now non-null by construction (every branch of
+            // the when above produces a Char); the lint flag was the
+            // redundant `Char?` declaration plus the dead `!= null`
+            // check that never short-circuited.
+            if (keep == '\n' || keep == ' ' || keep == '\t') {
+                runLength = 0
+            } else {
+                runLength += 1
             }
+            // Break pathologically long unbreakable runs by inserting a
+            // soft space. 80 chars is well above any natural word length
+            // but well under what would wrap.
+            if (runLength > MAX_UNBREAKABLE_RUN) {
+                sb.append(' ')
+                runLength = 0
+            }
+            sb.append(keep)
             i += 1
         }
         return sb.toString()
@@ -1173,14 +1182,14 @@ class HealthReportPdfGenerator(
 
         // Paint colours — plain RGB ints (not Compose Colors) since
         // android.graphics.Paint works in the classic colour space.
-        private val COLOR_INK: Int = Color.parseColor("#15201B")
-        private val COLOR_MUTED: Int = Color.parseColor("#6A7671")
-        private val COLOR_ACCENT: Int = Color.parseColor("#3EA887")
-        private val COLOR_RULE: Int = Color.parseColor("#D6E2DC")
-        private val COLOR_RULE_SOFT: Int = Color.parseColor("#EAEFEC")
-        private val COLOR_SURFACE: Int = Color.parseColor("#F1F7F3")
-        private val COLOR_PILL_CLEAR: Int = Color.parseColor("#D7F4E4")
-        private val COLOR_PILL_SEEK: Int = Color.parseColor("#FADAD1")
+        private val COLOR_INK: Int = "#15201B".toColorInt()
+        private val COLOR_MUTED: Int = "#6A7671".toColorInt()
+        private val COLOR_ACCENT: Int = "#3EA887".toColorInt()
+        private val COLOR_RULE: Int = "#D6E2DC".toColorInt()
+        private val COLOR_RULE_SOFT: Int = "#EAEFEC".toColorInt()
+        private val COLOR_SURFACE: Int = "#F1F7F3".toColorInt()
+        private val COLOR_PILL_CLEAR: Int = "#D7F4E4".toColorInt()
+        private val COLOR_PILL_SEEK: Int = "#FADAD1".toColorInt()
     }
 }
 

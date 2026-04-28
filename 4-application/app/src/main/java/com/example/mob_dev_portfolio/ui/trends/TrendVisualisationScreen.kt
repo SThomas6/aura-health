@@ -150,7 +150,6 @@ private fun HeaderCopy() {
     }
 }
 
-@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 private fun RangeSegmented(selected: TrendRange, onSelect: (TrendRange) -> Unit) {
     val options = TrendRange.entries
@@ -348,7 +347,6 @@ private fun SymptomPicker(
  * call site makes the code noisy, so we wrap it once here and carry
  * the annotation on the wrapper.
  */
-@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 private fun ExposedDropdownMenu(
     expanded: Boolean,

@@ -111,8 +111,7 @@ class HealthSampleSeeder(
         // without it, the old seed's "yesterday" records stack with the
         // new seed's "yesterday" records and the step count doubles.
         val purgeStart = todayStart.minus(Duration.ofDays((DAYS + 1).toLong()))
-        val purgeEnd = now
-        runCatching { purgePriorSeedData(client, purgeStart, purgeEnd) }
+        runCatching { purgePriorSeedData(client, purgeStart, now) }
             .onFailure { Log.w(TAG, "prior-seed purge failed — pressing on", it) }
 
         var inserted = 0
@@ -127,11 +126,10 @@ class HealthSampleSeeder(
             val records = (0 until DAYS).map { daysAgo ->
                 val dayStart = todayStart.minus(Duration.ofDays(daysAgo.toLong()))
                 val isToday = daysAgo == 0
-                val start = dayStart
                 val end = if (isToday) todayEnd else dayStart.plus(Duration.ofDays(1))
                 val count = random.nextLong(3_000, 14_000)
                 StepsRecord(
-                    startTime = start,
+                    startTime = dayStart,
                     startZoneOffset = ZoneOffset.UTC,
                     endTime = end,
                     endZoneOffset = ZoneOffset.UTC,

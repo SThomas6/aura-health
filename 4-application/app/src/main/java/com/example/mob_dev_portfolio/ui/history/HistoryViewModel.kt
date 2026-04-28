@@ -19,6 +19,7 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.debounce
+import kotlinx.coroutines.flow.flowOf
 import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.drop
 import kotlinx.coroutines.flow.first
@@ -84,9 +85,9 @@ class HistoryViewModel(
      */
     val conditionGrouping: StateFlow<ConditionGrouping> =
         if (conditionRepository == null) {
-            kotlinx.coroutines.flow.flowOf(ConditionGrouping.Empty)
+            flowOf(ConditionGrouping.Empty)
         } else {
-            kotlinx.coroutines.flow.combine(
+            combine(
                 conditionRepository.observeAll(),
                 conditionRepository.observeAllLinks(),
             ) { conditions, links ->

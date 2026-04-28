@@ -469,7 +469,6 @@ private fun LogPickerSheet(
  * handled once at the Surface level, which also gives us the ripple and
  * accessibility role for free.
  */
-@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 private fun SelectableLogRow(
     log: SymptomLog,

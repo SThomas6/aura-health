@@ -712,10 +712,9 @@ private fun SymptomPicker(
         if (!customMode || value.isBlank()) {
             base
         } else {
-            val needle = value
             base.filter {
                 it.equals(SymptomCatalog.OTHER, ignoreCase = true) ||
-                    (it.contains(needle, ignoreCase = true) && !it.equals(needle, ignoreCase = true))
+                    (it.contains(value, ignoreCase = true) && !it.equals(value, ignoreCase = true))
             }
         }
     }
