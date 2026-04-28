@@ -84,16 +84,6 @@ class EnvironmentalHistoryRepository(
         return result
     }
 
-    /**
-     * Drop the memoisation. Useful on "the user just saved a new log
-     * with location" because that might change which coordinate we'd
-     * use for future fetches. We don't currently call this anywhere —
-     * cache entries age out when the process does.
-     */
-    suspend fun clear() {
-        mutex.withLock { cache.clear() }
-    }
-
     private suspend fun latestLocation(): Pair<Double, Double>? {
         val logs = symptomLogRepository.observeAll().firstOrNull() ?: return null
         return logs

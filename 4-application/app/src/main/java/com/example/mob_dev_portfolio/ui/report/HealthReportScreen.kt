@@ -50,6 +50,8 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.testTag
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.window.Dialog
@@ -300,7 +302,15 @@ private fun ClearedLogsToggleCard(
             androidx.compose.material3.Switch(
                 checked = include,
                 onCheckedChange = onChange,
-                modifier = Modifier.testTag("report_cleared_toggle_switch"),
+                modifier = Modifier
+                    .testTag("report_cleared_toggle_switch")
+                    .semantics {
+                        contentDescription = if (include) {
+                            "Cleared symptoms are included in the report. Double-tap to hide them."
+                        } else {
+                            "Cleared symptoms are hidden from the report. Double-tap to include them."
+                        }
+                    },
             )
         }
     }

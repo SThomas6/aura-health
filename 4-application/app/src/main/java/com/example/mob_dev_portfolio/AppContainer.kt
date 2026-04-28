@@ -189,7 +189,8 @@ interface AppContainer {
 
     /**
      * Room-backed store of medication reminders + their append-only dose
-     * history. Writes from the editor UI and the [MedicationReminderReceiver];
+     * history. Writes from the editor UI and the
+     * [com.example.mob_dev_portfolio.reminders.MedicationReminderReceiver];
      * reads drive the list/history screens and the Home preview card.
      */
     val medicationRepository: MedicationRepository

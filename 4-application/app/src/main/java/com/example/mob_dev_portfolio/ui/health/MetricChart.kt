@@ -45,14 +45,15 @@ import java.util.Locale
 
 /**
  * Unified chart renderer for the Home mini-card and the fullscreen
- * detail. The [style] dictates which visual the metric renders as:
+ * detail. The `style` parameter dictates which visual the metric
+ * renders as:
  *
  *  - [ChartStyle.Bar] — cumulative metrics (steps, sleep, active kcal,
  *    exercise count). One bar per bucket.
  *  - [ChartStyle.Line] — trending point-in-time metrics (heart rate,
  *    resting HR, weight, SpO₂, respiratory rate, height, body fat).
  *
- * The rendering is hand-rolled with Compose [Canvas] — matches the
+ * The rendering is hand-rolled with Compose `Canvas` — matches the
  * existing [com.example.mob_dev_portfolio.ui.home.HomeScreen] trend chart
  * style and avoids pulling in a third-party dep.
  *
@@ -65,11 +66,11 @@ import java.util.Locale
  * the fullscreen detail get it for free.
  *
  * ### Axes
- * When [showAxis] is true the chart reserves a left gutter for 3 Y-tick
+ * When `showAxis` is true the chart reserves a left gutter for 3 Y-tick
  * labels (min/mid/max) and a bottom strip for 4 X-tick labels. The gutter
- * widths are calibrated to the max label width produced by [metric] at
- * the current [range] so the plot area never jitters between frames. The
- * mini-card leaves [showAxis] false so the tiny 72.dp canvas stays pure
+ * widths are calibrated to the max label width produced by `metric` at
+ * the current `range` so the plot area never jitters between frames. The
+ * mini-card leaves `showAxis` false so the tiny 72.dp canvas stays pure
  * chart.
  */
 enum class ChartStyle { Bar, Line }

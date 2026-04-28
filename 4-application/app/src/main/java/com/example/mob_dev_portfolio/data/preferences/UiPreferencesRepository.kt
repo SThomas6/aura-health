@@ -41,7 +41,7 @@ open class UiPreferencesRepository(
      * First-launch onboarding state.
      *
      * The flag flips to `true` once the user steps through the welcome +
-     * permission-rationale screens, after which [AuraApp] takes over as
+     * permission-rationale screens, after which [com.example.mob_dev_portfolio.ui.AuraApp] takes over as
      * the root UI. A dedicated boolean (rather than reusing, say, an
      * installed-version int) means clearing the flag remotely in a
      * future migration is as simple as deleting the key.

@@ -52,8 +52,12 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.vector.ImageVector
+import com.example.mob_dev_portfolio.R
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.testTag
+import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
@@ -102,12 +106,17 @@ fun SettingsScreen(
         biometricAvailability(context)
     }
     val snackbarHost = remember { SnackbarHostState() }
+    // Resolve the snackbar action label in @Composable scope so the
+    // LaunchedEffect (which is *not* composable) doesn't reach back
+    // through `context.getString` — Compose lint flags that pattern
+    // because the resource read isn't observable for config changes.
+    val retryLabel = stringResource(R.string.action_retry)
 
     LaunchedEffect(themeError) {
         themeError?.let { error ->
             val result = snackbarHost.showSnackbar(
                 message = error.message,
-                actionLabel = "Retry",
+                actionLabel = retryLabel,
                 duration = SnackbarDuration.Long,
             )
             if (result == SnackbarResult.ActionPerformed) themeViewModel.retryLastError()
@@ -118,13 +127,16 @@ fun SettingsScreen(
     Scaffold(
         topBar = {
             TopAppBar(
-                title = { Text("Settings") },
+                title = { Text(stringResource(R.string.title_settings)) },
                 navigationIcon = {
                     IconButton(
                         onClick = onBack,
                         modifier = Modifier.sizeIn(minWidth = 48.dp, minHeight = 48.dp),
                     ) {
-                        Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Back")
+                        Icon(
+                            Icons.AutoMirrored.Filled.ArrowBack,
+                            contentDescription = stringResource(R.string.action_back),
+                        )
                     }
                 },
             )
@@ -154,22 +166,22 @@ fun SettingsScreen(
             )
 
             SettingsNavCard(
-                title = "Demographic profile",
-                subtitle = "Date of birth and biological sex for more accurate analysis.",
+                title = stringResource(R.string.title_demographic_profile),
+                subtitle = stringResource(R.string.settings_demographic_subtitle),
                 icon = Icons.Filled.Person,
                 onClick = onOpenDemographicProfile,
                 testTag = "settings_demographic_profile",
             )
             SettingsNavCard(
-                title = "Health data integration",
-                subtitle = "Connect Health Connect to enrich AI analysis with your vitals.",
+                title = stringResource(R.string.title_health_data),
+                subtitle = stringResource(R.string.settings_health_data_subtitle),
                 icon = Icons.Filled.Favorite,
                 onClick = onOpenHealthDataSettings,
                 testTag = "settings_health_data",
             )
             SettingsNavCard(
-                title = "Health conditions",
-                subtitle = "Add chronic or pre-existing conditions (e.g. diabetes, asthma) so the AI has context and your symptom logs can be grouped.",
+                title = stringResource(R.string.title_health_conditions),
+                subtitle = stringResource(R.string.settings_health_conditions_subtitle),
                 icon = Icons.Filled.HealthAndSafety,
                 onClick = onOpenHealthConditions,
                 testTag = "settings_health_conditions",
@@ -187,9 +199,9 @@ fun SettingsScreen(
 @Composable
 private fun AppearanceCard(current: ThemeMode, onSelect: (ThemeMode) -> Unit) {
     val options = listOf(
-        ThemeModeOption(ThemeMode.System, "System", Icons.Filled.SettingsBrightness),
-        ThemeModeOption(ThemeMode.Light, "Light", Icons.Filled.LightMode),
-        ThemeModeOption(ThemeMode.Dark, "Dark", Icons.Filled.DarkMode),
+        ThemeModeOption(ThemeMode.System, stringResource(R.string.settings_appearance_system), Icons.Filled.SettingsBrightness),
+        ThemeModeOption(ThemeMode.Light, stringResource(R.string.settings_appearance_light), Icons.Filled.LightMode),
+        ThemeModeOption(ThemeMode.Dark, stringResource(R.string.settings_appearance_dark), Icons.Filled.DarkMode),
     )
     Card(
         shape = MaterialTheme.shapes.large,
@@ -200,7 +212,7 @@ private fun AppearanceCard(current: ThemeMode, onSelect: (ThemeMode) -> Unit) {
             modifier = Modifier.padding(16.dp),
             verticalArrangement = Arrangement.spacedBy(10.dp),
         ) {
-            Text("Appearance", style = MaterialTheme.typography.titleMedium)
+            Text(stringResource(R.string.settings_appearance), style = MaterialTheme.typography.titleMedium)
             SingleChoiceSegmentedButtonRow(modifier = Modifier.fillMaxWidth()) {
                 options.forEachIndexed { index, option ->
                     val selected = option.mode == current
@@ -338,12 +350,12 @@ private fun MedicationRemindersCard(
             Spacer(Modifier.size(14.dp))
             Column(modifier = Modifier.weight(1f)) {
                 Text(
-                    "Medication reminders",
+                    stringResource(R.string.settings_medication_reminders_title),
                     style = MaterialTheme.typography.titleMedium,
                     fontWeight = FontWeight.SemiBold,
                 )
                 Text(
-                    "Pause all medication reminders without deleting their schedules.",
+                    stringResource(R.string.settings_medication_reminders_subtitle),
                     style = MaterialTheme.typography.bodyMedium,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
@@ -352,7 +364,15 @@ private fun MedicationRemindersCard(
             Switch(
                 checked = enabled,
                 onCheckedChange = onToggle,
-                modifier = Modifier.testTag("switch_medication_reminders"),
+                modifier = Modifier
+                    .testTag("switch_medication_reminders")
+                    .semantics {
+                        contentDescription = if (enabled) {
+                            "Medication reminders enabled. Double-tap to pause all reminders."
+                        } else {
+                            "Medication reminders paused. Double-tap to enable."
+                        }
+                    },
             )
         }
     }
@@ -384,12 +404,12 @@ private fun BiometricLockCard(
         // When the lock is already on we keep the copy action-oriented
         // ("this is protecting you") rather than repeating the setup
         // hint, which is only useful before the user opts in.
-        enabled -> "Require fingerprint, face, or device PIN to open the app."
+        enabled -> stringResource(R.string.settings_biometric_lock_active)
         availability == BiometricAvailability.Available ->
-            "Require fingerprint, face, or device PIN to open the app."
+            stringResource(R.string.settings_biometric_lock_active)
         availability == BiometricAvailability.NoneEnrolled ->
-            "Set up a fingerprint or screen lock in system Settings to enable."
-        else -> "Biometric hardware isn't available on this device."
+            stringResource(R.string.settings_biometric_lock_setup_hint)
+        else -> stringResource(R.string.settings_biometric_lock_unavailable)
     }
     Card(
         shape = MaterialTheme.shapes.large,
@@ -420,7 +440,7 @@ private fun BiometricLockCard(
             Spacer(Modifier.size(14.dp))
             Column(modifier = Modifier.weight(1f)) {
                 Text(
-                    "Lock with biometrics",
+                    stringResource(R.string.settings_biometric_lock_title),
                     style = MaterialTheme.typography.titleMedium,
                     fontWeight = FontWeight.SemiBold,
                 )
@@ -439,7 +459,15 @@ private fun BiometricLockCard(
                 // be locked into an on-state they can't escape from.
                 enabled = canEnable || enabled,
                 onCheckedChange = onToggle,
-                modifier = Modifier.testTag("switch_biometric_lock"),
+                modifier = Modifier
+                    .testTag("switch_biometric_lock")
+                    .semantics {
+                        contentDescription = if (enabled) {
+                            "Biometric app lock enabled. Double-tap to disable."
+                        } else {
+                            "Biometric app lock disabled. Double-tap to require fingerprint or device PIN to open the app."
+                        }
+                    },
             )
         }
     }

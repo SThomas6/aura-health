@@ -584,7 +584,12 @@ private fun TrendChart(
 
 @Composable
 private fun TrendLabels(trend: List<DailyCount>) {
-    val formatter = DateTimeFormatter.ofPattern("EEE", Locale.getDefault())
+    // Read the locale from LocalConfiguration so the labels recompose
+    // when the user changes the system language at runtime — Compose's
+    // NonObservableLocale lint catches the bare `Locale.getDefault()`
+    // call because it doesn't subscribe to that change.
+    val locale = androidx.compose.ui.platform.LocalConfiguration.current.locales[0]
+    val formatter = DateTimeFormatter.ofPattern("EEE", locale)
     Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
         trend.forEach { entry ->
             Text(

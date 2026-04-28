@@ -5,8 +5,12 @@
   ui-text-google-fonts documentation; they are the public fingerprint of
   the com.google.android.gms content provider and do not need to be kept
   secret.
+
+  `tools:ignore="Typos"` because the values are base64-encoded
+  signatures, not English prose — the spell checker flags every base64
+  block (hundreds of warnings) and there's nothing to "correct".
 -->
-<resources>
+<resources xmlns:tools="http://schemas.android.com/tools" tools:ignore="Typos">
     <array name="com_google_android_gms_fonts_certs">
         <item>@array/com_google_android_gms_fonts_certs_dev</item>
         <item>@array/com_google_android_gms_fonts_certs_prod</item>

@@ -73,6 +73,8 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.testTag
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.core.content.ContextCompat
@@ -329,7 +331,15 @@ fun LogSymptomScreen(
                 Switch(
                     checked = uiState.draft.hasEnded,
                     onCheckedChange = viewModel::onHasEndedChange,
-                    modifier = Modifier.testTag("switch_has_ended"),
+                    modifier = Modifier
+                        .testTag("switch_has_ended")
+                        .semantics {
+                            contentDescription = if (uiState.draft.hasEnded) {
+                                "Symptom marked as ended. Double-tap to mark it as still ongoing."
+                            } else {
+                                "Symptom marked as ongoing. Double-tap to record an end date and time."
+                            }
+                        },
                 )
             }
 
@@ -526,123 +536,6 @@ private fun SectionHeader(title: String, subtitle: String) {
             style = MaterialTheme.typography.bodyMedium,
             color = MaterialTheme.colorScheme.onSurfaceVariant,
         )
-    }
-}
-
-/**
- * Read-only dropdown for pinning the log to one of the doctor-flagged
- * diagnoses. "None" clears the link on save — passed up as a null
- * selection so the VM can issue a detach instead of an attach.
- */
-@OptIn(ExperimentalMaterial3Api::class)
-@Composable
-private fun DiagnosisPicker(
-    diagnoses: List<DoctorDiagnosis>,
-    selectedId: Long?,
-    onSelect: (Long?) -> Unit,
-) {
-    var expanded by rememberSaveable { mutableStateOf(false) }
-    val selectedLabel = remember(selectedId, diagnoses) {
-        diagnoses.firstOrNull { it.id == selectedId }?.label
-    }
-
-    ExposedDropdownMenuBox(
-        expanded = expanded,
-        onExpandedChange = { expanded = it },
-    ) {
-        OutlinedTextField(
-            value = selectedLabel?.ifBlank { "(unlabelled issue)" } ?: "None",
-            onValueChange = {},
-            readOnly = true,
-            label = { Text("Diagnosis link") },
-            trailingIcon = { ExposedDropdownMenuDefaults.TrailingIcon(expanded = expanded) },
-            modifier = Modifier
-                .menuAnchor(ExposedDropdownMenuAnchorType.PrimaryNotEditable, enabled = true)
-                .fillMaxWidth()
-                .testTag("field_diagnosis_link"),
-        )
-        ExposedDropdownMenu(
-            expanded = expanded,
-            onDismissRequest = { expanded = false },
-        ) {
-            DropdownMenuItem(
-                text = { Text("None") },
-                onClick = {
-                    expanded = false
-                    onSelect(null)
-                },
-                modifier = Modifier.testTag("diagnosis_option_none"),
-            )
-            diagnoses.forEach { diagnosis ->
-                DropdownMenuItem(
-                    text = { Text(diagnosis.label.ifBlank { "(unlabelled issue)" }) },
-                    onClick = {
-                        expanded = false
-                        onSelect(diagnosis.id)
-                    },
-                    modifier = Modifier.testTag("diagnosis_option_${diagnosis.id}"),
-                )
-            }
-        }
-    }
-}
-
-/**
- * Mirror of [DiagnosisPicker] for user-declared health conditions.
- * Two separate composables (rather than a generic one) because the
- * domain models live in different modules and the test tags differ —
- * keeping them parallel makes the rendering trivial to read.
- */
-@OptIn(ExperimentalMaterial3Api::class)
-@Composable
-private fun HealthConditionPicker(
-    conditions: List<com.example.mob_dev_portfolio.data.condition.HealthCondition>,
-    selectedId: Long?,
-    onSelect: (Long?) -> Unit,
-) {
-    var expanded by rememberSaveable { mutableStateOf(false) }
-    val selectedLabel = remember(selectedId, conditions) {
-        conditions.firstOrNull { it.id == selectedId }?.name
-    }
-
-    ExposedDropdownMenuBox(
-        expanded = expanded,
-        onExpandedChange = { expanded = it },
-    ) {
-        OutlinedTextField(
-            value = selectedLabel ?: "None",
-            onValueChange = {},
-            readOnly = true,
-            label = { Text("Health condition") },
-            trailingIcon = { ExposedDropdownMenuDefaults.TrailingIcon(expanded = expanded) },
-            modifier = Modifier
-                .menuAnchor(ExposedDropdownMenuAnchorType.PrimaryNotEditable, enabled = true)
-                .fillMaxWidth()
-                .testTag("field_condition_link"),
-        )
-        ExposedDropdownMenu(
-            expanded = expanded,
-            onDismissRequest = { expanded = false },
-        ) {
-            DropdownMenuItem(
-                text = { Text("None") },
-                onClick = {
-                    expanded = false
-                    onSelect(null)
-                },
-                modifier = Modifier.testTag("condition_option_none"),
-            )
-            conditions.forEach { condition ->
-                DropdownMenuItem(
-                    text = { Text(condition.name) },
-                    onClick = {
-                        expanded = false
-                        onSelect(condition.id)
-                    },
-                    modifier = Modifier.testTag("condition_option_${condition.id}"),
-                )
-            }
-        }
     }
 }
 
@@ -894,136 +787,9 @@ private fun PillButton(
 }
 
 @OptIn(ExperimentalMaterial3Api::class)
-@Composable
-private fun DatePickerSheet(
-    initial: LocalDate,
-    onDismiss: () -> Unit,
-    onConfirm: (LocalDate) -> Unit,
-) {
-    val initialMillis = initial.atStartOfDay(ZoneId.systemDefault()).toInstant().toEpochMilli()
-    val state = rememberDatePickerState(initialSelectedDateMillis = initialMillis)
-    DatePickerDialog(
-        onDismissRequest = onDismiss,
-        confirmButton = {
-            TextButton(
-                onClick = {
-                    val picked = state.selectedDateMillis ?: initialMillis
-                    val date = Instant.ofEpochMilli(picked).atZone(ZoneId.systemDefault()).toLocalDate()
-                    onConfirm(date)
-                },
-                modifier = Modifier.sizeIn(minWidth = 48.dp, minHeight = 48.dp),
-            ) { Text("OK") }
-        },
-        dismissButton = {
-            TextButton(onClick = onDismiss, modifier = Modifier.sizeIn(minWidth = 48.dp, minHeight = 48.dp)) { Text("Cancel") }
-        },
-    ) {
-        DatePicker(state = state)
-    }
-}
-
-@OptIn(ExperimentalMaterial3Api::class)
-@Composable
-private fun TimePickerSheet(
-    initial: LocalTime,
-    onDismiss: () -> Unit,
-    onConfirm: (LocalTime) -> Unit,
-) {
-    val state = rememberTimePickerState(initialHour = initial.hour, initialMinute = initial.minute, is24Hour = true)
-    Dialog(onDismissRequest = onDismiss) {
-        Surface(
-            shape = RoundedCornerShape(24.dp),
-            color = MaterialTheme.colorScheme.surface,
-        ) {
-            Column(
-                modifier = Modifier.padding(24.dp),
-                verticalArrangement = Arrangement.spacedBy(16.dp),
-            ) {
-                Text("Select time", style = MaterialTheme.typography.titleLarge)
-                TimePicker(state = state)
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.End,
-                ) {
-                    TextButton(onClick = onDismiss, modifier = Modifier.sizeIn(minWidth = 48.dp, minHeight = 48.dp)) { Text("Cancel") }
-                    Spacer(Modifier.width(8.dp))
-                    TextButton(
-                        onClick = { onConfirm(LocalTime.of(state.hour, state.minute)) },
-                        modifier = Modifier.sizeIn(minWidth = 48.dp, minHeight = 48.dp),
-                    ) { Text("OK") }
-                }
-            }
-        }
-    }
-}
-
-@Composable
-private fun EditLoadingState(modifier: Modifier = Modifier) {
-    Box(modifier = modifier.testTag("edit_loading"), contentAlignment = Alignment.Center) {
-        Column(horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(12.dp)) {
-            CircularProgressIndicator()
-            Text("Loading log…", style = MaterialTheme.typography.bodyMedium)
-        }
-    }
-}
-
-@Composable
-private fun EditNotFoundState(onBack: () -> Unit, modifier: Modifier = Modifier) {
-    Box(modifier = modifier.testTag("edit_not_found"), contentAlignment = Alignment.Center) {
-        Column(
-            horizontalAlignment = Alignment.CenterHorizontally,
-            verticalArrangement = Arrangement.spacedBy(12.dp),
-            modifier = Modifier.padding(24.dp),
-        ) {
-            Text("Log unavailable", style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.SemiBold)
-            Text(
-                "This entry has been deleted or is no longer available.",
-                style = MaterialTheme.typography.bodyMedium,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-            )
-            Spacer(Modifier.height(4.dp))
-            Button(
-                onClick = onBack,
-                modifier = Modifier.heightIn(min = 48.dp).testTag("btn_edit_not_found_back"),
-            ) { Text("Go back") }
-        }
-    }
-}
-
-@Composable
-private fun EditFailedState(
-    message: String,
-    onRetry: () -> Unit,
-    onBack: () -> Unit,
-    modifier: Modifier = Modifier,
-) {
-    Box(modifier = modifier.testTag("edit_failed"), contentAlignment = Alignment.Center) {
-        Column(
-            horizontalAlignment = Alignment.CenterHorizontally,
-            verticalArrangement = Arrangement.spacedBy(12.dp),
-            modifier = Modifier.padding(24.dp),
-        ) {
-            Icon(
-                Icons.Filled.ErrorOutline,
-                contentDescription = null,
-                modifier = Modifier.size(40.dp),
-                tint = MaterialTheme.colorScheme.error,
-            )
-            Text("Couldn't load this log", style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.SemiBold)
-            Text(
-                message,
-                style = MaterialTheme.typography.bodyMedium,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-            )
-            Spacer(Modifier.height(4.dp))
-            Button(
-                onClick = onRetry,
-                modifier = Modifier.heightIn(min = 48.dp).testTag("btn_edit_retry"),
-            ) { Text("Try again") }
-            TextButton(onClick = onBack) { Text("Go back") }
-        }
-    }
-}
+// Date/time picker sheets and the three Edit*State empty-states have
+// moved to LogSymptomDateTimeSheets.kt and LogSymptomEditStates.kt
+// respectively, to keep this file focused on the editor form layout.
 
 @Composable
 private fun LocationOptIn(
@@ -1055,7 +821,15 @@ private fun LocationOptIn(
                 Switch(
                     checked = attachLocation,
                     onCheckedChange = onToggle,
-                    modifier = Modifier.testTag("switch_attach_location"),
+                    modifier = Modifier
+                        .testTag("switch_attach_location")
+                        .semantics {
+                            contentDescription = if (attachLocation) {
+                                "Location and weather will be attached on save. Double-tap to disable."
+                            } else {
+                                "Location and weather will not be attached. Double-tap to enable."
+                            }
+                        },
                 )
             }
             if (attachLocation && !permissionGranted) {

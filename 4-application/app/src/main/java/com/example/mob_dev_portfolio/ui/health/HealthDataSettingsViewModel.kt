@@ -142,7 +142,7 @@ class HealthDataSettingsViewModel(
      * integration and active grants. Also auto-seeds 14 days of demo
      * data on first connect so the dashboard has graphs to render.
      *
-     * Notice we flip BOTH [connectionActive] and [integrationEnabled] on
+     * Notice we flip BOTH `connectionActive` and `integrationEnabled` on
      * — Connect defaults the AI toggle on so the common case is "tap
      * once, everything works". Users who want to stay connected but opt
      * out of AI inclusion flip that toggle off separately.
@@ -160,7 +160,7 @@ class HealthDataSettingsViewModel(
 
     /**
      * Auto-seed 14 days of plausible sample data on every successful
-     * Connect. We deliberately do NOT gate on [sampleSeeded] — the
+     * Connect. We deliberately do NOT gate on `sampleSeeded` — the
      * seeder is idempotent via deterministic `clientRecordId`s and
      * purges its own prior records before writing, so a re-Connect
      * always lands the user on a fresh two-week window ending today.
@@ -175,7 +175,7 @@ class HealthDataSettingsViewModel(
      *   - The seeder's HC-side upsert semantics mean re-running is
      *     free — it's a handful of insertRecords calls that HC resolves
      *     to no-op or replacement writes.
-     *   - The [sampleSeeded] preference is still flipped on success,
+     *   - The `sampleSeeded` preference is still flipped on success,
      *     kept purely as a telemetry signal for future analytics.
      *
      * Silent on both success and failure — the dashboard is the

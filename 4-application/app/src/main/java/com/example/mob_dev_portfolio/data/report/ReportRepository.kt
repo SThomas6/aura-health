@@ -141,9 +141,7 @@ data class ReportSnapshot(
      * [includesClearedLogs] is true.
      */
     val hiddenClearedCount: Int = 0,
-) {
-    val hasContent: Boolean get() = logs.isNotEmpty() || analyses.isNotEmpty()
-}
+)
 
 /** Compact row for the chronological logs section. */
 data class ReportLog(
@@ -203,14 +201,3 @@ private fun AnalysisRunEntity.toReportAnalysis(): ReportAnalysis = ReportAnalysi
     summaryText = summaryText,
 )
 
-/**
- * Helper shim so tests and the UI can convert a domain [AnalysisRun]
- * into the report shape without touching Room.
- */
-internal fun AnalysisRun.toReportAnalysis(): ReportAnalysis = ReportAnalysis(
-    id = id,
-    completedAtEpochMillis = completedAtEpochMillis,
-    guidance = guidance,
-    headline = headline,
-    summaryText = summaryText,
-)

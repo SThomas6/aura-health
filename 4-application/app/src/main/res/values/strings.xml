@@ -5,5 +5,52 @@
       app/build.gradle so the launcher label can differ between variants
       ("Aura Health (Demo)" vs. "Aura Health") while both can be
       installed side-by-side via the .demo applicationId suffix.
+
+      This file holds every user-visible string that has been wired
+      through `stringResource(...)` so far. Strings still inline in
+      Kotlin files are tracked as a follow-up i18n task — the migration
+      is incremental rather than big-bang to keep diffs small and easy
+      to review.
     -->
+
+    <!-- ============================================================
+         Top-level navigation (NavigationSuiteScaffold)
+         ============================================================ -->
+    <string name="nav_home">Home</string>
+    <string name="nav_symptoms">Symptoms</string>
+    <string name="nav_doctor">Doctor</string>
+    <string name="nav_analyse">Analyse</string>
+
+    <!-- ============================================================
+         Screen titles (Top app bar) — only the ones wired so far.
+         More to come as the i18n migration progresses.
+         ============================================================ -->
+    <string name="title_settings">Settings</string>
+    <string name="title_health_data">Health data integration</string>
+    <string name="title_health_conditions">Health conditions</string>
+    <string name="title_demographic_profile">Demographic profile</string>
+
+    <!-- ============================================================
+         Common actions / button labels
+         ============================================================ -->
+    <string name="action_back">Back</string>
+    <string name="action_retry">Retry</string>
+
+    <!-- ============================================================
+         Settings screen body strings
+         ============================================================ -->
+    <string name="settings_appearance">Appearance</string>
+    <string name="settings_appearance_system">System</string>
+    <string name="settings_appearance_light">Light</string>
+    <string name="settings_appearance_dark">Dark</string>
+    <string name="settings_demographic_subtitle">Date of birth and biological sex for more accurate analysis.</string>
+    <string name="settings_health_data_subtitle">Connect Health Connect to enrich AI analysis with your vitals.</string>
+    <string name="settings_health_conditions_subtitle">Add chronic or pre-existing conditions (e.g. diabetes, asthma) so the AI has context and your symptom logs can be grouped.</string>
+    <string name="settings_medication_reminders_title">Medication reminders</string>
+    <string name="settings_medication_reminders_subtitle">Pause all medication reminders without deleting their schedules.</string>
+    <string name="settings_biometric_lock_title">Lock with biometrics</string>
+    <string name="settings_biometric_lock_active">Require fingerprint, face, or device PIN to open the app.</string>
+    <string name="settings_biometric_lock_setup_hint">Set up a fingerprint or screen lock in system Settings to enable.</string>
+    <string name="settings_biometric_lock_unavailable">Biometric hardware isn\'t available on this device.</string>
+
 </resources>

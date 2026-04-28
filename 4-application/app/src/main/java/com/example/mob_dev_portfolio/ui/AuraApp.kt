@@ -9,6 +9,7 @@ import androidx.compose.runtime.remember
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.testTag
+import androidx.compose.ui.res.stringResource
 import androidx.lifecycle.viewmodel.compose.viewModel
 import androidx.navigation.NavController
 import androidx.navigation.NavDestination.Companion.hasRoute
@@ -108,9 +109,15 @@ fun AuraApp() {
         }
     }
 
+    // Resolve labels outside the navigationSuiteItems lambda — that
+    // lambda is a plain `NavigationSuiteScope.() -> Unit`, not a
+    // `@Composable` lambda, so `stringResource` can't be invoked
+    // inside it. We pre-fetch the strings into a parallel list.
+    val destinationLabels = TopLevelDestinations.map { stringResource(it.labelRes) }
+
     NavigationSuiteScaffold(
         navigationSuiteItems = {
-            TopLevelDestinations.forEach { dest ->
+            TopLevelDestinations.forEachIndexed { index, dest ->
                 val selected = when (dest.route) {
                     TopLevelRoute.Home -> hierarchy?.any { it.hasRoute<TopLevelRoute.Home>() } == true
                     // The Symptoms tab owns the list, the per-log detail,
@@ -137,12 +144,15 @@ fun AuraApp() {
                             it.hasRoute<DoctorVisitEditorRoute>()
                     } == true
                 }
+                val label = destinationLabels[index]
                 item(
                     selected = selected,
                     onClick = { navigateToTopLevel(navController, dest.route) },
-                    icon = { Icon(dest.icon, contentDescription = dest.label) },
-                    label = { Text(dest.label) },
-                    modifier = Modifier.testTag("nav_${dest.label.lowercase()}"),
+                    icon = { Icon(dest.icon, contentDescription = label) },
+                    label = { Text(label) },
+                    // testTag uses the locale-independent id so UI tests
+                    // don't break when the label is translated.
+                    modifier = Modifier.testTag("nav_${dest.testTagId}"),
                 )
             }
         },

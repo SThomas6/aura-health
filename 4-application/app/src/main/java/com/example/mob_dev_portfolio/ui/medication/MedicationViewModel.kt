@@ -132,7 +132,7 @@ class MedicationListViewModel(
      * In-app equivalent of the "Snooze 15 min" action. Marks the
      * current event SNOOZED and arms a fresh alarm 15 minutes out
      * regardless of the reminder's recurrence — identical path to
-     * [MedicationActionReceiver]'s handling. Returning the
+     * [com.example.mob_dev_portfolio.reminders.MedicationActionReceiver]'s handling. Returning the
      * snooze-until instant lets the UI surface "Snoozed until HH:MM"
      * without a second read.
      */

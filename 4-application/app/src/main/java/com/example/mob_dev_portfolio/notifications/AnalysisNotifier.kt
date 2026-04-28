@@ -189,8 +189,8 @@ open class AnalysisNotifier(
             "com.example.mob_dev_portfolio.EXTRA_ANALYSIS_RUN_ID"
 
         /**
-         * Factory exposed so [AnalysisNotifierTest] can assert the intent
-         * shape without a live Context-backed PendingIntent.
+         * Factory exposed so unit tests can assert the intent shape
+         * without a live Context-backed PendingIntent.
          */
         fun buildDeepLinkIntent(context: Context, runId: Long? = null): Intent =
             Intent(context, MainActivity::class.java).apply {

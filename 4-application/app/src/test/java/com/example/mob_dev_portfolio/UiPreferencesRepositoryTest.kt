@@ -121,19 +121,10 @@ private class FakePreferencesDataStore : DataStore<Preferences> {
     override val data = flow
 
     override suspend fun updateData(transform: suspend (t: Preferences) -> Preferences): Preferences {
-        val previous = flow.value
-        val mutable = previous.toMutablePreferences()
+        // Datastore's built-in extension does the snapshot-copy for us.
+        val mutable = flow.value.toMutablePreferences()
         val updated = transform(mutable)
         flow.value = updated
         return updated
-    }
-
-    private fun Preferences.toMutablePreferences(): MutablePreferences {
-        val out = mutablePreferencesOf()
-        asMap().forEach { (key, value) ->
-            @Suppress("UNCHECKED_CAST")
-            out[key as Preferences.Key<Any>] = value
-        }
-        return out
     }
 }

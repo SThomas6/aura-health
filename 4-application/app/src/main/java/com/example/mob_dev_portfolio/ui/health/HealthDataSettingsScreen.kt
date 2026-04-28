@@ -37,6 +37,8 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.testTag
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.health.connect.client.PermissionController
@@ -332,7 +334,15 @@ private fun MasterToggleCard(
                     checked = integrationEnabled,
                     onCheckedChange = onToggleAiInclude,
                     enabled = connectionActive,
-                    modifier = Modifier.testTag("health_master_switch"),
+                    modifier = Modifier
+                        .testTag("health_master_switch")
+                        .semantics {
+                            contentDescription = if (integrationEnabled) {
+                                "Health Connect data is being included in AI analysis. Double-tap to stop."
+                            } else {
+                                "Health Connect data is not being included in AI analysis. Double-tap to include it."
+                            }
+                        },
                 )
             }
         }
@@ -406,7 +416,15 @@ private fun MetricRow(
         Switch(
             checked = row.enabled,
             onCheckedChange = onToggle,
-            modifier = Modifier.testTag("health_toggle_${row.metric.storageKey}"),
+            modifier = Modifier
+                .testTag("health_toggle_${row.metric.storageKey}")
+                .semantics {
+                    contentDescription = if (row.enabled) {
+                        "${row.metric.displayLabel} is enabled. Double-tap to stop including it in analysis."
+                    } else {
+                        "${row.metric.displayLabel} is disabled. Double-tap to include it in analysis."
+                    }
+                },
         )
     }
 }

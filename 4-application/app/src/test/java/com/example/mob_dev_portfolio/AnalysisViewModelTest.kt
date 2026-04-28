@@ -321,11 +321,9 @@ class AnalysisViewModelTest {
         }
 
         override fun currentWorkInfos(): Flow<List<WorkInfo>> = flow.asStateFlow()
-        override fun cancel() = Unit
         // The weekly schedule surface is outside the ViewModel's concerns,
-        // so the recording fake just swallows the calls.
+        // so the recording fake just swallows the call.
         override fun scheduleWeekly() = Unit
-        override fun cancelWeekly() = Unit
 
         fun emit(info: WorkInfo) {
             flow.value = listOf(info)

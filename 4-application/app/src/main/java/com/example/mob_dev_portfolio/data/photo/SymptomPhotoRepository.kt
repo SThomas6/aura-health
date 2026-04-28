@@ -64,8 +64,6 @@ open class SymptomPhotoRepository(
     open suspend fun listForLog(logId: Long): List<SymptomPhoto> =
         dao.listForLog(logId).map { it.toDomain() }
 
-    open suspend fun countForLog(logId: Long): Int = dao.countForLog(logId)
-
     /**
      * Ingests a single photo from a content-URI and returns the new
      * [SymptomPhoto], or `null` if the cap was already reached or
@@ -139,14 +137,6 @@ open class SymptomPhotoRepository(
     open suspend fun readBytes(photo: SymptomPhoto): ByteArray? = withContext(Dispatchers.IO) {
         if (!photo.file.exists()) return@withContext null
         runCatching { photo.file.inputStream().use { PhotoEncryption.decryptFromStream(it) } }.getOrNull()
-    }
-
-    /** See [readBytes]; this variant takes the DAO id directly. */
-    open suspend fun readBytes(photoId: Long): ByteArray? = withContext(Dispatchers.IO) {
-        val row = dao.getById(photoId) ?: return@withContext null
-        val file = File(photoDir(), row.storageFileName)
-        if (!file.exists()) return@withContext null
-        runCatching { file.inputStream().use { PhotoEncryption.decryptFromStream(it) } }.getOrNull()
     }
 
     private fun photoDir(): File = File(context.filesDir, PHOTOS_SUBDIR)

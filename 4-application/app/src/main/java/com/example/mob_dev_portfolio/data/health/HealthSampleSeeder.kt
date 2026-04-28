@@ -372,7 +372,7 @@ class HealthSampleSeeder(
     }
 
     /**
-     * Build a [Metadata] with a deterministic [clientRecordId] so
+     * Build a [Metadata] with a deterministic `clientRecordId` so
      * subsequent seed runs upsert rather than duplicate.
      *
      * Health Connect 1.1.0 stable made the [Metadata] constructor

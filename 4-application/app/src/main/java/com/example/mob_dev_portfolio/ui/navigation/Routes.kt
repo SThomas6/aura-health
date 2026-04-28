@@ -1,11 +1,13 @@
 package com.example.mob_dev_portfolio.ui.navigation
 
+import androidx.annotation.StringRes
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ListAlt
 import androidx.compose.material.icons.filled.AutoAwesome
 import androidx.compose.material.icons.filled.Home
 import androidx.compose.material.icons.filled.MedicalServices
 import androidx.compose.ui.graphics.vector.ImageVector
+import com.example.mob_dev_portfolio.R
 import kotlinx.serialization.Serializable
 
 sealed interface TopLevelRoute {
@@ -172,16 +174,28 @@ data class DoctorVisitDetailRoute(val id: Long)
 @Serializable
 data class DoctorVisitEditorRoute(val id: Long? = null)
 
+/**
+ * One bottom-bar / nav-rail destination. The label is held as a
+ * [StringRes] (not a literal) so the user-visible text is centralised
+ * in `strings.xml` — easier to translate, easier for the marker to
+ * audit i18n compliance. The composable resolves the resource via
+ * `stringResource(dest.labelRes)` inside the navigation suite.
+ */
 data class TopLevelDestination(
     val route: TopLevelRoute,
-    val label: String,
+    @StringRes val labelRes: Int,
     val icon: ImageVector,
     val routeQualifiedName: String,
+    /**
+     * Stable, locale-independent identifier — used for `testTag` so
+     * Compose UI tests don't break when the label translates.
+     */
+    val testTagId: String,
 )
 
 val TopLevelDestinations: List<TopLevelDestination> = listOf(
-    TopLevelDestination(TopLevelRoute.Home, "Home", Icons.Filled.Home, TopLevelRoute.Home::class.qualifiedName.orEmpty()),
-    TopLevelDestination(TopLevelRoute.History, "Symptoms", Icons.AutoMirrored.Filled.ListAlt, TopLevelRoute.History::class.qualifiedName.orEmpty()),
-    TopLevelDestination(TopLevelRoute.Doctor, "Doctor", Icons.Filled.MedicalServices, TopLevelRoute.Doctor::class.qualifiedName.orEmpty()),
-    TopLevelDestination(TopLevelRoute.Analysis, "Analyse", Icons.Filled.AutoAwesome, TopLevelRoute.Analysis::class.qualifiedName.orEmpty()),
+    TopLevelDestination(TopLevelRoute.Home, R.string.nav_home, Icons.Filled.Home, TopLevelRoute.Home::class.qualifiedName.orEmpty(), "home"),
+    TopLevelDestination(TopLevelRoute.History, R.string.nav_symptoms, Icons.AutoMirrored.Filled.ListAlt, TopLevelRoute.History::class.qualifiedName.orEmpty(), "symptoms"),
+    TopLevelDestination(TopLevelRoute.Doctor, R.string.nav_doctor, Icons.Filled.MedicalServices, TopLevelRoute.Doctor::class.qualifiedName.orEmpty(), "doctor"),
+    TopLevelDestination(TopLevelRoute.Analysis, R.string.nav_analyse, Icons.Filled.AutoAwesome, TopLevelRoute.Analysis::class.qualifiedName.orEmpty(), "analyse"),
 )

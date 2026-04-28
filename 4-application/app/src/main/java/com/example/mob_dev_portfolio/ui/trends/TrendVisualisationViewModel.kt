@@ -108,10 +108,7 @@ data class OverlayOption(
     val label: String,
     val units: String,
     val kind: OverlayKind,
-) {
-    /** Health Connect option tied to a real metric record. Null for env options. */
-    val healthMetric: HealthConnectMetric? = (kind as? OverlayKind.Health)?.metric
-}
+)
 
 sealed class OverlayKind {
     data object EnvHumidity : OverlayKind()
@@ -218,8 +215,6 @@ class TrendVisualisationViewModel(
     private val anchorEnd = MutableStateFlow(clock.instant())
 
     val range: StateFlow<TrendRange> = selectedRange.asStateFlow()
-    val selection: StateFlow<String?> = selectedSymptom.asStateFlow()
-    val overlays: StateFlow<Set<String>> = selectedOverlayIds.asStateFlow()
 
     private val logsFlow: Flow<List<SymptomLog>> = symptomRepository.observeAll()
 

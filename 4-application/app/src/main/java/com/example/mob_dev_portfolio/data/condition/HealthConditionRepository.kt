@@ -26,8 +26,6 @@ data class UserConditionsSnapshot(
     /** logId → conditionLabel. Inverse projection for fast lookup per log. */
     val conditionLabelByLogId: Map<Long, String>,
 ) {
-    val isEmpty: Boolean get() = conditionLabels.isEmpty()
-
     companion object {
         val Empty = UserConditionsSnapshot(
             conditionLabels = emptyMap(),

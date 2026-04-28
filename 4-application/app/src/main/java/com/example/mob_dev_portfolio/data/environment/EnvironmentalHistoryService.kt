@@ -14,7 +14,7 @@ import java.time.Instant
  *     the Trends ViewModel needs continuous lines to overlay the chart.
  *
  * The implementation (Open-Meteo) picks the right upstream endpoint based
- * on how far back [start] lies — recent windows use the forecast endpoint
+ * on how far back the `start` instant lies — recent windows use the forecast endpoint
  * with `past_days=N`, older windows use the dedicated archive endpoint.
  * That split is an implementation concern the caller should not see.
  */

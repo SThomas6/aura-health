@@ -46,11 +46,7 @@ sealed interface HealthReportState {
         val uncompressedBytes: Long,
         val compressedBytes: Long,
         val snapshot: ReportSnapshot,
-    ) : HealthReportState {
-        val compressionRatio: Double
-            get() = if (uncompressedBytes <= 0L) 0.0
-            else 1.0 - (compressedBytes.toDouble() / uncompressedBytes.toDouble())
-    }
+    ) : HealthReportState
     data class Error(val message: String) : HealthReportState
 }
 
@@ -135,11 +131,6 @@ class HealthReportViewModel(
                     )
                 }
         }
-    }
-
-    /** Reset back to idle — e.g. user dismissed the preview. */
-    fun reset() {
-        _state.value = HealthReportState.Idle
     }
 
     /**

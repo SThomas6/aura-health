@@ -67,8 +67,6 @@ object DatabasePassphraseProvider {
     private val lock = Any()
     @Volatile private var cached: ByteArray? = null
 
-    suspend fun get(context: Context): ByteArray = obtain(context).passphrase
-
     suspend fun obtain(context: Context): PassphraseResult {
         cached?.let { return PassphraseResult(it, PassphraseOutcome.Reused) }
         val store = context.applicationContext.securityStore

@@ -75,9 +75,7 @@ class HealthHistoryRepository(
         val points: List<DataPoint>,
         /** Sum / avg / max over the entire range — for the card headline. */
         val summary: Summary,
-    ) {
-        val isEmpty: Boolean get() = points.all { it.value == 0.0 }
-    }
+    )
 
     data class Summary(
         val total: Double?,
@@ -105,7 +103,8 @@ class HealthHistoryRepository(
     /**
      * Read a single metric over a range. Returns a zero-filled series if
      * the permission isn't granted or the read fails — the caller
-     * renders the chart with an empty-state overlay based on [Series.isEmpty].
+     * renders the chart with an empty-state overlay when every point's
+     * value is zero.
      *
      * [endInstant] lets a caller pull a historical window (e.g. "last
      * week, anchored 7 days ago"). When omitted we default to the

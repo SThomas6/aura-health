@@ -476,8 +476,13 @@ private fun ChartCard(state: TrendUiState) {
                     style = MaterialTheme.typography.titleLarge,
                     modifier = Modifier.weight(1f),
                 )
+                // Read the locale through LocalConfiguration so the
+                // uppercased label recomposes if the user changes the
+                // system language at runtime (Compose lint flags the
+                // bare `Locale.getDefault()` for not subscribing).
+                val locale = androidx.compose.ui.platform.LocalConfiguration.current.locales[0]
                 Text(
-                    state.range.label.uppercase(Locale.getDefault()),
+                    state.range.label.uppercase(locale),
                     style = MaterialTheme.typography.labelMedium,
                     color = MaterialTheme.colorScheme.primary,
                 )

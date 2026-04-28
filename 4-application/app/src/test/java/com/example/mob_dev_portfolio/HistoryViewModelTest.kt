@@ -201,18 +201,10 @@ private class InMemoryPreferencesDataStore : DataStore<Preferences> {
     override val data = flow
 
     override suspend fun updateData(transform: suspend (t: Preferences) -> Preferences): Preferences {
+        // Datastore's built-in extension snapshot-copies the prefs.
         val mutable = flow.value.toMutablePreferences()
         val updated = transform(mutable)
         flow.value = updated
         return updated
-    }
-
-    private fun Preferences.toMutablePreferences(): MutablePreferences {
-        val out = mutablePreferencesOf()
-        asMap().forEach { (key, value) ->
-            @Suppress("UNCHECKED_CAST")
-            out[key as Preferences.Key<Any>] = value
-        }
-        return out
     }
 }

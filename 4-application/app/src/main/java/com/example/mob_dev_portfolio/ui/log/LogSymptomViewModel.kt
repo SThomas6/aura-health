@@ -415,7 +415,9 @@ class LogSymptomViewModel(
             // If the user didn't opt in, or permission wasn't granted, or the
             // provider returns anything other than coordinates, we persist
             // null — saving always succeeds even when location fails.
-            val capture = maybeCaptureLocation(
+            val capture = captureLocation(
+                provider = locationProvider,
+                reverseGeocoder = reverseGeocoder,
                 attach = draft.attachLocation,
                 permissionGranted = current.locationPermissionGranted,
                 fallbackLat = draft.locationLatitude,
@@ -430,7 +432,9 @@ class LogSymptomViewModel(
             val envOutcome = if (isEditing) {
                 EnvironmentalOutcome(snapshot = draft.toSnapshot(), warning = null)
             } else {
-                maybeFetchEnvironmental(
+                fetchEnvironmental(
+                    service = environmentalService,
+                    timeoutMillis = environmentalTimeoutMillis,
                     lat = capture.latitude,
                     lng = capture.longitude,
                 )
@@ -583,139 +587,11 @@ class LogSymptomViewModel(
         }
     }
 
-    private data class EnvironmentalOutcome(
-        val snapshot: EnvironmentalSnapshot,
-        val warning: String?,
-    )
-
-    /**
-     * Runs the 5-second environmental fetch. Skipped when there is no location
-     * (nothing to look up) or no service bound (tests, headless builds).
-     *
-     * Every failure mode is translated into a non-blocking Snackbar message
-     * via [EnvironmentalOutcome.warning]. The snapshot is returned as-is —
-     * the outer save flow persists whatever fields came back, even a partial
-     * success, without ever crashing the save.
-     */
-    private suspend fun maybeFetchEnvironmental(
-        lat: Double?,
-        lng: Double?,
-    ): EnvironmentalOutcome {
-        if (lat == null || lng == null) {
-            return EnvironmentalOutcome(EnvironmentalSnapshot.EMPTY, warning = null)
-        }
-        val service = environmentalService
-            ?: return EnvironmentalOutcome(EnvironmentalSnapshot.EMPTY, warning = null)
-
-        return try {
-            val result = withTimeout(environmentalTimeoutMillis) {
-                service.fetch(lat, lng)
-            }
-            when (result) {
-                is EnvironmentalFetchResult.Success ->
-                    EnvironmentalOutcome(result.snapshot, warning = null)
-                is EnvironmentalFetchResult.NoNetwork ->
-                    EnvironmentalOutcome(
-                        EnvironmentalSnapshot.EMPTY,
-                        warning = "No internet — saved without weather data.",
-                    )
-                is EnvironmentalFetchResult.Timeout ->
-                    EnvironmentalOutcome(
-                        EnvironmentalSnapshot.EMPTY,
-                        warning = "Weather service timed out — saved without it.",
-                    )
-                is EnvironmentalFetchResult.ApiError ->
-                    EnvironmentalOutcome(
-                        EnvironmentalSnapshot.EMPTY,
-                        warning = result.message,
-                    )
-            }
-        } catch (_: TimeoutCancellationException) {
-            // withTimeout fired before the service finished — this is the
-            // authoritative 5s SLA enforcement. The request is cancelled
-            // cooperatively; we map it to the same Timeout UX as a
-            // service-level timeout.
-            EnvironmentalOutcome(
-                EnvironmentalSnapshot.EMPTY,
-                warning = "Weather service timed out — saved without it.",
-            )
-        } catch (error: Exception) {
-            // Defensive catch-all — a mis-implemented service could throw
-            // something unexpected. We MUST NOT crash the save flow.
-            EnvironmentalOutcome(
-                EnvironmentalSnapshot.EMPTY,
-                warning = "Weather unavailable: ${error.message ?: "unexpected error"}",
-            )
-        }
-    }
-
-    private data class CaptureOutcome(
-        val latitude: Double?,
-        val longitude: Double?,
-        val name: String? = null,
-        val warning: String? = null,
-    )
-
-    private suspend fun maybeCaptureLocation(
-        attach: Boolean,
-        permissionGranted: Boolean,
-        fallbackLat: Double?,
-        fallbackLng: Double?,
-        fallbackName: String?,
-    ): CaptureOutcome {
-        if (!attach) return CaptureOutcome(latitude = null, longitude = null)
-        val provider = locationProvider
-            ?: return CaptureOutcome(
-                latitude = fallbackLat,
-                longitude = fallbackLng,
-                name = fallbackName,
-                warning = "Location services unavailable on this device.",
-            )
-        if (!permissionGranted) {
-            return CaptureOutcome(
-                latitude = fallbackLat,
-                longitude = fallbackLng,
-                name = fallbackName,
-                warning = "Location permission not granted — location not attached.",
-            )
-        }
-        return when (val result = provider.fetchCurrentLocation()) {
-            is LocationResult.Coordinates -> {
-                // Round FIRST — every downstream consumer (DB, geocoder, UI)
-                // sees the same ~1 km grid.
-                val roundedLat = CoordinateRounding.roundCoordinate(result.latitude)
-                val roundedLng = CoordinateRounding.roundCoordinate(result.longitude)
-                // Reverse geocode on the rounded pair — never the raw fix.
-                // Runs once here at save time; the resulting string is
-                // persisted and re-read, never recomputed on UI bind.
-                val name = reverseGeocoder?.reverseGeocode(roundedLat, roundedLng)
-                    ?: ReverseGeocoder.UNAVAILABLE
-                CaptureOutcome(
-                    latitude = roundedLat,
-                    longitude = roundedLng,
-                    name = name,
-                )
-            }
-            is LocationResult.PermissionDenied -> CaptureOutcome(
-                latitude = fallbackLat,
-                longitude = fallbackLng,
-                name = fallbackName,
-                warning = "Location permission denied — location not attached.",
-            )
-            is LocationResult.Unavailable -> CaptureOutcome(
-                latitude = fallbackLat,
-                longitude = fallbackLng,
-                name = fallbackName,
-                warning = "Couldn't get a location fix — saved without it.",
-            )
-            is LocationResult.Failed -> CaptureOutcome(
-                latitude = fallbackLat,
-                longitude = fallbackLng,
-                name = fallbackName,
-                warning = "Location error: ${result.message}",
-            )
-        }
-    }
+    // EnvironmentalOutcome / CaptureOutcome data classes and the
+    // `fetchEnvironmental` / `captureLocation` save-time helpers live
+    // in LogSymptomCaptureHelpers.kt. They're pure orchestration over
+    // injected dependencies, so lifting them out keeps the VM
+    // focused on UI state.
 
     private inline fun updateDraft(field: LogField?, transform: LogDraft.() -> LogDraft) {
         _state.update { current ->

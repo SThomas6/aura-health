@@ -53,8 +53,6 @@ open class SymptomLogRepository(
     open fun observeById(id: Long): Flow<SymptomLog?> =
         dao.observeById(id).map { it?.toDomain() }
 
-    open fun observeCount(): Flow<Int> = dao.observeCount()
-
     open suspend fun save(log: SymptomLog): Long = dao.insert(log.toEntity())
 
     open suspend fun update(log: SymptomLog): Int = dao.update(log.toEntity())

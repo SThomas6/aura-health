@@ -30,7 +30,7 @@ class TrendBucketing(private val zone: ZoneId = ZoneId.systemDefault()) {
     /**
      * Pre-computed axis for one render pass. Bucket starts and ends are
      * paired 1:1 so a sample is binary-searched into the unique bucket
-     * where `start[i] <= time < end[i]`.
+     * where the inequality `start ≤ time < end` holds for that index.
      */
     data class Axis(
         val bucketStarts: List<Instant>,

@@ -27,7 +27,7 @@ import java.time.Instant
  *      restores behaviour without data loss.
  *   3. Insert a `PENDING` dose event so the Taken/Snooze action
  *      buttons have an id to update (FR-MR-06 depends on this).
- *   4. Post the notification via [MedicationReminderNotifier] with
+ *   4. Post the notification via [com.example.mob_dev_portfolio.notifications.MedicationReminderNotifier] with
  *      action buttons that carry the event id.
  *   5. Arm the next fire for recurring schedules. One-offs self-expire
  *      after firing once — [NextFireCalculator] returns null for a

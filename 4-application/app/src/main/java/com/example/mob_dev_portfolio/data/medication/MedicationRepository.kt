@@ -89,9 +89,6 @@ open class MedicationRepository(
     open fun observeAll(): Flow<List<MedicationReminder>> =
         reminderDao.observeAll().map { list -> list.map { it.toDomain() } }
 
-    open fun observeById(id: Long): Flow<MedicationReminder?> =
-        reminderDao.observeById(id).map { it?.toDomain() }
-
     open suspend fun listAll(): List<MedicationReminder> =
         reminderDao.listAll().map { it.toDomain() }
 

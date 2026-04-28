@@ -28,12 +28,11 @@ import kotlinx.coroutines.flow.Flow
 interface AnalysisScheduler {
     fun enqueue(userContext: String)
     fun currentWorkInfos(): Flow<List<WorkInfo>>
-    fun cancel()
 
     /**
      * Ensure a weekly background analysis is scheduled.
      *
-     * Idempotent: call this from [AuraApplication.onCreate] on every cold
+     * Idempotent: call this from `AuraApplication.onCreate` on every cold
      * start. [ExistingPeriodicWorkPolicy.KEEP] means the first call wins —
      * we never restart the countdown, so the weekly cadence drifts at most
      * one period even if the user force-stops and relaunches the app.
@@ -43,9 +42,6 @@ interface AnalysisScheduler {
      * ping when something actually needs attention.
      */
     fun scheduleWeekly()
-
-    /** Cancel the recurring weekly run (e.g. if the user opts out). */
-    fun cancelWeekly()
 }
 
 class WorkManagerAnalysisScheduler(
@@ -78,10 +74,6 @@ class WorkManagerAnalysisScheduler(
     override fun currentWorkInfos(): Flow<List<WorkInfo>> =
         workManager.getWorkInfosForUniqueWorkFlow(AnalysisWorker.UNIQUE_WORK_NAME)
 
-    override fun cancel() {
-        workManager.cancelUniqueWork(AnalysisWorker.UNIQUE_WORK_NAME)
-    }
-
     override fun scheduleWeekly() {
         val request = PeriodicWorkRequestBuilder<AnalysisWorker>(7, TimeUnit.DAYS)
             .setInputData(workDataOf(AnalysisWorker.KEY_SCHEDULED to true))
@@ -105,7 +97,4 @@ class WorkManagerAnalysisScheduler(
         )
     }
 
-    override fun cancelWeekly() {
-        workManager.cancelUniqueWork(AnalysisWorker.UNIQUE_WEEKLY_NAME)
-    }
 }
