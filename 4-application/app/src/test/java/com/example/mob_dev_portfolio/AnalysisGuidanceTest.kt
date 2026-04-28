@@ -67,8 +67,8 @@ class AnalysisGuidanceTest {
     fun headlines_are_distinct_and_non_empty() {
         // Guard against a future refactor accidentally making both copies
         // identical — the whole point of the enum is to be glanceable.
-        assertEquals(2, AnalysisGuidance.values().map { it.headline }.toSet().size)
-        AnalysisGuidance.values().forEach { g ->
+        assertEquals(2, AnalysisGuidance.entries.map { it.headline }.toSet().size)
+        AnalysisGuidance.entries.forEach { g ->
             assert(g.headline.isNotBlank()) { "${g.name} headline was blank" }
             assert(g.bodyHint.isNotBlank()) { "${g.name} bodyHint was blank" }
         }

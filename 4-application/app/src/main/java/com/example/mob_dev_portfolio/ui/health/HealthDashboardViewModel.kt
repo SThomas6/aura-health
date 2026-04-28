@@ -114,7 +114,11 @@ class HealthDashboardViewModel(
                 )
                 return@launch
             }
-            _state.value = _state.value.copy(loading = true, sdkAvailable = true, connectionActive = connectionOn)
+            // After the early returns above, `connectionOn` is guaranteed
+            // true — we're past the `!connectionOn || enabled.isEmpty()`
+            // guard. Spelling it out as a literal makes the invariant
+            // visible to readers and silences the constant-conditions lint.
+            _state.value = _state.value.copy(loading = true, sdkAvailable = true, connectionActive = true)
             val readable = healthConnectService.readableMetrics(enabled)
             // Preserve catalogue declaration order so the dashboard ordering
             // is stable across reloads.
@@ -138,7 +142,7 @@ class HealthDashboardViewModel(
             _state.value = HealthDashboardState(
                 loading = false,
                 sdkAvailable = true,
-                connectionActive = connectionOn,
+                connectionActive = true,
                 cards = cards,
             )
             // `force` just keeps the signature symmetric — a future UI could

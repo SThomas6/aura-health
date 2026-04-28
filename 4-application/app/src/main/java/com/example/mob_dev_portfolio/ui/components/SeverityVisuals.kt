@@ -248,17 +248,6 @@ fun SeveritySegmentedRow(
     }
 }
 
-/** Horizontal rule that sits between sections of a form. */
-@Composable
-fun SectionDivider(modifier: Modifier = Modifier) {
-    Spacer(
-        modifier = modifier
-            .fillMaxWidth()
-            .height(1.dp)
-            .background(MaterialTheme.colorScheme.outlineVariant),
-    )
-}
-
 /**
  * Gradient brush used by the Home hero and Analysis intro hero cards.
  * Exposed as a function so callers can compose it into other brushes

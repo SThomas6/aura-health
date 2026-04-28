@@ -145,15 +145,6 @@ open class MedicationRepository(
     open fun observeEventsSince(windowMillis: Long, now: Long): Flow<List<DoseEvent>> =
         doseEventDao.observeSince(now - windowMillis).map { list -> list.map { it.toDomain(now) } }
 
-    open fun observeEventsForReminderSince(
-        medicationId: Long,
-        windowMillis: Long,
-        now: Long,
-    ): Flow<List<DoseEvent>> =
-        doseEventDao
-            .observeForReminderSince(medicationId, now - windowMillis)
-            .map { list -> list.map { it.toDomain(now) } }
-
     open suspend fun pruneOlderThan(cutoffEpochMillis: Long): Int =
         doseEventDao.deleteOlderThan(cutoffEpochMillis)
 }

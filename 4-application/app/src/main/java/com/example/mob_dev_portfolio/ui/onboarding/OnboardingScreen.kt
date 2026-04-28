@@ -199,7 +199,7 @@ fun OnboardingScreen(
                 .testTag("onboarding_screen"),
             verticalArrangement = Arrangement.spacedBy(16.dp),
         ) {
-            StepIndicator(current = step, total = totalSteps())
+            StepIndicator(current = step, total = TOTAL_STEPS)
             when (step) {
                 0 -> WelcomeCard()
                 1 -> PermissionCard(
@@ -254,9 +254,9 @@ fun OnboardingScreen(
                 horizontalArrangement = Arrangement.SpaceBetween,
                 verticalAlignment = Alignment.CenterVertically,
             ) {
-                AnimatedVisibility(visible = step in 1..(totalSteps() - 2), enter = fadeIn(), exit = fadeOut()) {
+                AnimatedVisibility(visible = step in 1..(TOTAL_STEPS - 2), enter = fadeIn(), exit = fadeOut()) {
                     TextButton(
-                        onClick = { step = (step + 1).coerceAtMost(totalSteps() - 1) },
+                        onClick = { step = (step + 1).coerceAtMost(TOTAL_STEPS - 1) },
                         modifier = Modifier.testTag("onboarding_skip"),
                     ) {
                         Text("Skip for now")
@@ -265,7 +265,7 @@ fun OnboardingScreen(
                 Spacer(Modifier.size(8.dp))
                 Button(
                     onClick = {
-                        if (step < totalSteps() - 1) {
+                        if (step < TOTAL_STEPS - 1) {
                             step += 1
                         } else {
                             // Persist the completion flag first, then call
@@ -286,7 +286,7 @@ fun OnboardingScreen(
                         .heightIn(min = 48.dp)
                         .testTag("onboarding_next"),
                 ) {
-                    Text(if (step < totalSteps() - 1) "Next" else "Start tracking")
+                    Text(if (step < TOTAL_STEPS - 1) "Next" else "Start tracking")
                 }
             }
         }
@@ -294,7 +294,7 @@ fun OnboardingScreen(
 }
 
 /** 5 steps: welcome, notifications, location, health connect, ready. */
-private fun totalSteps(): Int = 6
+private const val TOTAL_STEPS: Int = 6
 
 @Composable
 private fun StepIndicator(current: Int, total: Int) {

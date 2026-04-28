@@ -26,7 +26,6 @@ import java.util.TimeZone
  * We verify this without touching HTTP — a recording fake client captures
  * the request object and the test inspects every string field for leaks.
  */
-@OptIn(ExperimentalCoroutinesApi::class)
 class AnalysisServicePayloadTest {
 
     private class RecordingClient : GeminiClient {

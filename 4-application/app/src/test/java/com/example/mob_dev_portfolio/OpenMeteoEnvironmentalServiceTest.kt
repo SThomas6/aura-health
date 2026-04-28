@@ -28,7 +28,6 @@ import java.util.concurrent.TimeUnit
  * queue order because the two endpoints are fetched in parallel — there is
  * no guaranteed arrival order.
  */
-@OptIn(ExperimentalCoroutinesApi::class)
 class OpenMeteoEnvironmentalServiceTest {
 
     private lateinit var server: MockWebServer

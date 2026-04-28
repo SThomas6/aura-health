@@ -27,7 +27,6 @@ import java.util.TimeZone
  * no network, no DB. Every assertion here is on the [AnalysisRequest]
  * that *would* be sent, which is the real contract surface.
  */
-@OptIn(ExperimentalCoroutinesApi::class)
 class AnalysisServiceDoctorContextTest {
 
     private class RecordingClient : GeminiClient {

@@ -9,7 +9,6 @@ import com.example.mob_dev_portfolio.data.SymptomLog
 import com.example.mob_dev_portfolio.data.SymptomLogRepository
 import com.example.mob_dev_portfolio.data.doctor.DoctorVisitDetail
 import com.example.mob_dev_portfolio.data.doctor.DoctorVisitRepository
-import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.combine

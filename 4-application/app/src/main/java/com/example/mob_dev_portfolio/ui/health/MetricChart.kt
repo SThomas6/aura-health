@@ -230,7 +230,6 @@ fun MetricChart(
             // downstream geometry maths read in plot-coordinates rather
             // than gutter-arithmetic. Lint can't tell the difference
             // between value and intent — the @Suppress is targeted.
-            @Suppress("UnnecessaryVariable")
             val plotLeft = leftGutterPx
             val plotRight = canvasWidth - rightPadPx
             val plotTop = 0f
@@ -267,7 +266,6 @@ fun MetricChart(
                     metric = metric,
                     min = yMin.toDouble(),
                     max = yMax.toDouble(),
-                    plotTop = plotTop,
                     plotBottom = plotBottom,
                     leftGutterPx = leftGutterPx,
                     trackColor = trackColor,
@@ -422,7 +420,6 @@ fun MetricChart(
                     anchorY = yAtPoint,
                     plotLeft = plotLeft,
                     plotRight = plotRight,
-                    plotTop = plotTop,
                 )
             }
         }
@@ -457,7 +454,6 @@ private fun bucketIndexAt(
     if (bucketCount <= 0) return null
     // Same naming-vs-value rationale as in [Chart] — see the kdoc-style
     // comment there for why the alias survives the lint hint.
-    @Suppress("UnnecessaryVariable")
     val plotLeft = leftGutterPx
     val plotRight = canvasWidth - rightPadPx
     val plotWidth = (plotRight - plotLeft).coerceAtLeast(1f)
@@ -488,7 +484,6 @@ private fun DrawScope.drawYAxis(
     metric: HealthConnectMetric,
     min: Double,
     max: Double,
-    plotTop: Float,
     plotBottom: Float,
     leftGutterPx: Float,
     trackColor: Color,
@@ -498,7 +493,9 @@ private fun DrawScope.drawYAxis(
     repeat(ticks) { i ->
         val fraction = i.toDouble() / (ticks - 1)
         val value = min + fraction * range0
-        val y = plotBottom - (fraction.toFloat() * (plotBottom - plotTop))
+        // The plot's top edge is y = 0, so `(plotBottom - 0) * fraction`
+        // collapses to `plotBottom * fraction` — saves a wasted operand.
+        val y = plotBottom - (fraction.toFloat() * plotBottom)
         // Light grid line through each tick — breaks visually noisy
         // single-colour plots into readable thirds.
         drawLine(
@@ -563,7 +560,6 @@ private fun DrawScope.drawTooltip(
     anchorY: Float,
     plotLeft: Float,
     plotRight: Float,
-    plotTop: Float,
 ) {
     val valueLayout = textMeasurer.measure(valueText, valueStyle)
     val captionLayout = textMeasurer.measure(captionText, captionStyle)
@@ -573,9 +569,11 @@ private fun DrawScope.drawTooltip(
     val width = maxOf(valueLayout.size.width, captionLayout.size.width) + padH * 2
     val height = valueLayout.size.height + captionLayout.size.height + padV * 2 + innerSpacing
 
-    // Prefer above the point; flip below if there's no room.
+    // Prefer above the point; flip below if there's no room. The plot
+    // always starts at y = 0, so the "fits above" check just needs to
+    // see if the tooltip's top edge would be non-negative.
     val gap = 10f
-    val preferAbove = anchorY - gap - height >= plotTop
+    val preferAbove = anchorY - gap - height >= 0f
     val top = if (preferAbove) anchorY - gap - height else anchorY + gap
 
     val left = (anchorX - width / 2f)

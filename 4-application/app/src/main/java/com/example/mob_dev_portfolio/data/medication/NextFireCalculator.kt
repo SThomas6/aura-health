@@ -93,7 +93,4 @@ object NextFireCalculator {
         DayOfWeek.SATURDAY -> "Sat"
         DayOfWeek.SUNDAY -> "Sun"
     }
-
-    fun LocalDate.toStartOfDayInstant(zone: ZoneId): Instant =
-        atStartOfDay(zone).toInstant()
 }

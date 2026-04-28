@@ -374,11 +374,14 @@ class HealthSampleSeeder(
     /**
      * Build a [Metadata] with a deterministic [clientRecordId] so
      * subsequent seed runs upsert rather than duplicate.
+     *
+     * Health Connect 1.1.0 stable made the [Metadata] constructor
+     * `internal` and exposes a `manualEntry(...)` factory in its place.
+     * The factory still threads through `clientRecordId`, so the
+     * upsert semantics are preserved.
      */
-    private fun seedMetadata(kind: String, daysAgo: Int): Metadata = Metadata(
-        clientRecordId = "$CLIENT_ID_PREFIX-$kind-d$daysAgo",
-        recordingMethod = Metadata.RECORDING_METHOD_MANUAL_ENTRY,
-    )
+    private fun seedMetadata(kind: String, daysAgo: Int): Metadata =
+        Metadata.manualEntry(clientRecordId = "$CLIENT_ID_PREFIX-$kind-d$daysAgo")
 
     /**
      * The write-permission strings the seeder needs. Mirrors the read

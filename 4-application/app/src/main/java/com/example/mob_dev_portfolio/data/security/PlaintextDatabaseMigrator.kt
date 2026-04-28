@@ -32,7 +32,7 @@ object PlaintextDatabaseMigrator {
                 null,
                 SQLiteDatabase.OPEN_READONLY,
             ).use { db ->
-                if (!tableExists(db, "symptom_logs")) return@use emptyList<SymptomLogEntity>()
+                if (!symptomLogsTableExists(db)) return@use emptyList<SymptomLogEntity>()
                 val rows = mutableListOf<SymptomLogEntity>()
                 db.rawQuery(
                     "SELECT id, symptomName, description, startEpochMillis, endEpochMillis, severity, medication, contextTags, notes, createdAtEpochMillis FROM symptom_logs",
@@ -74,10 +74,10 @@ object PlaintextDatabaseMigrator {
     fun importBlocking(dao: SymptomLogDao, rows: List<SymptomLogEntity>): Int =
         runBlocking { importInto(dao, rows) }
 
-    private fun tableExists(db: SQLiteDatabase, name: String): Boolean {
+    private fun symptomLogsTableExists(db: SQLiteDatabase): Boolean {
         return db.rawQuery(
             "SELECT 1 FROM sqlite_master WHERE type='table' AND name=?",
-            arrayOf(name),
+            arrayOf("symptom_logs"),
         ).use { it.moveToFirst() }
     }
 }

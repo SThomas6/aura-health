@@ -43,7 +43,7 @@ import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.ExposedDropdownMenuBox
 import androidx.compose.material3.ExposedDropdownMenuBoxScope
 import androidx.compose.material3.ExposedDropdownMenuDefaults
-import androidx.compose.material3.MenuAnchorType
+import androidx.compose.material3.ExposedDropdownMenuAnchorType
 import androidx.compose.material3.FilterChip
 import androidx.compose.material3.FilterChipDefaults
 import androidx.compose.material3.HorizontalDivider
@@ -557,7 +557,7 @@ private fun DiagnosisPicker(
             label = { Text("Diagnosis link") },
             trailingIcon = { ExposedDropdownMenuDefaults.TrailingIcon(expanded = expanded) },
             modifier = Modifier
-                .menuAnchor(MenuAnchorType.PrimaryNotEditable, enabled = true)
+                .menuAnchor(ExposedDropdownMenuAnchorType.PrimaryNotEditable, enabled = true)
                 .fillMaxWidth()
                 .testTag("field_diagnosis_link"),
         )
@@ -616,7 +616,7 @@ private fun HealthConditionPicker(
             label = { Text("Health condition") },
             trailingIcon = { ExposedDropdownMenuDefaults.TrailingIcon(expanded = expanded) },
             modifier = Modifier
-                .menuAnchor(MenuAnchorType.PrimaryNotEditable, enabled = true)
+                .menuAnchor(ExposedDropdownMenuAnchorType.PrimaryNotEditable, enabled = true)
                 .fillMaxWidth()
                 .testTag("field_condition_link"),
         )
@@ -754,8 +754,8 @@ private fun SymptomPicker(
                     // tells the anchor to treat taps as "open the menu",
                     // which is what gives us the "no keyboard until Other"
                     // behaviour the user asked for.
-                    if (customMode) MenuAnchorType.PrimaryEditable
-                    else MenuAnchorType.PrimaryNotEditable,
+                    if (customMode) ExposedDropdownMenuAnchorType.PrimaryEditable
+                    else ExposedDropdownMenuAnchorType.PrimaryNotEditable,
                     enabled = true,
                 )
                 .fillMaxWidth()

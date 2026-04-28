@@ -24,10 +24,34 @@ enum class PassphraseOutcome {
     GeneratedAfterCorruption,
 }
 
-data class PassphraseResult(
+/**
+ * Result of a passphrase request — the raw key bytes plus how they
+ * were obtained.
+ *
+ * Hand-rolled `equals` / `hashCode` because the auto-generated data-class
+ * versions compare arrays by reference identity (Kotlin / JVM
+ * limitation). Without these overrides two `PassphraseResult` values
+ * holding the same bytes would test as unequal, which would silently
+ * break any future caching or equality-based assertions.
+ */
+class PassphraseResult(
     val passphrase: ByteArray,
     val outcome: PassphraseOutcome,
-)
+) {
+    override fun equals(other: Any?): Boolean {
+        if (this === other) return true
+        if (other !is PassphraseResult) return false
+        if (!passphrase.contentEquals(other.passphrase)) return false
+        if (outcome != other.outcome) return false
+        return true
+    }
+
+    override fun hashCode(): Int {
+        var result = passphrase.contentHashCode()
+        result = 31 * result + outcome.hashCode()
+        return result
+    }
+}
 
 object DatabasePassphraseProvider {
 

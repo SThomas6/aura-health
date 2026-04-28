@@ -218,14 +218,6 @@ class HealthDataSettingsViewModel(
         }
     }
 
-    /**
-     * Helper to group the metric rows by category for the settings UI.
-     * Done here (rather than in the composable) so a future screenshot
-     * test can pin the ordering.
-     */
-    fun groupedRows(): Map<HealthMetricCategory, List<HealthMetricRowState>> =
-        state.value.metricRows.groupBy { it.metric.category }
-
     companion object {
         val Factory: ViewModelProvider.Factory = object : ViewModelProvider.Factory {
             @Suppress("UNCHECKED_CAST")

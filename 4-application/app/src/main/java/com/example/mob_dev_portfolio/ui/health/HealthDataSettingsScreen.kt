@@ -386,11 +386,13 @@ private fun MetricRow(
     ) {
         Column(Modifier.weight(1f)) {
             Text(row.metric.displayLabel, style = MaterialTheme.typography.bodyLarge)
+            // The first two arms cover every `row.enabled == true` case,
+            // so the third arm is reached only when `enabled == false` —
+            // we can use `else` instead of the redundant `!row.enabled`.
             val subtitle = when {
                 row.enabled && row.granted -> "Enabled and permission granted."
                 row.enabled && !row.granted -> "Enabled — permission needed."
-                !row.enabled -> "Toggle on to include in the AI analysis."
-                else -> ""
+                else -> "Toggle on to include in the AI analysis."
             }
             Text(
                 text = subtitle,

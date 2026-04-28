@@ -169,7 +169,7 @@ private class FakeDetailRepository(
     initial: SymptomLog?,
 ) : SymptomLogRepository(NoOpDao()) {
 
-    private val state = MutableStateFlow<SymptomLog?>(initial)
+    private val state = MutableStateFlow(initial)
     var deleted: Boolean = false
         private set
 

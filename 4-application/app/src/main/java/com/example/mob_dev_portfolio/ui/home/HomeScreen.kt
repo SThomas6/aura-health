@@ -31,7 +31,6 @@ import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
-import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
@@ -556,7 +555,6 @@ private fun TrendChart(
         // Same numeric value as `strokePx` but documents intent — bars
         // are inset by one stroke-width from the top so the rounded
         // top edges aren't clipped by the canvas bounds.
-        @Suppress("UnnecessaryVariable")
         val topInset = strokePx
         val plotHeight = canvasHeight - topInset
 

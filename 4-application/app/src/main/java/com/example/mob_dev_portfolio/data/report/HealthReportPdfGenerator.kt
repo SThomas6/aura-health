@@ -248,7 +248,7 @@ class HealthReportPdfGenerator(
          * here, and [closePage] recycles them all *after* finishPage
          * returns, when it is safe to do so.
          */
-        private val bitmapsPendingRecycle: MutableList<android.graphics.Bitmap> = mutableListOf()
+        private val bitmapsPendingRecycle: MutableList<Bitmap> = mutableListOf()
 
         // -------------------------------------------------------------
         // Reusable paint objects.
@@ -548,7 +548,7 @@ class HealthReportPdfGenerator(
             if (!log.locationName.isNullOrBlank()) metaPieces += sanitizeForPdf(log.locationName)
             if (!log.weatherDescription.isNullOrBlank()) {
                 val temp = log.temperatureCelsius
-                    ?.let { " (${"%.1f".format(java.util.Locale.UK, it)}°C)" } ?: ""
+                    ?.let { " (${"%.1f".format(Locale.UK, it)}°C)" } ?: ""
                 metaPieces += "${sanitizeForPdf(log.weatherDescription)}$temp"
             }
             drawWrappedText(sanitizeForPdf(metaPieces.joinToString("  ·  ")), metaPaint)
@@ -629,7 +629,7 @@ class HealthReportPdfGenerator(
                 fillPaint.color = COLOR_RULE_SOFT
                 canvas.drawRoundRect(rect, 6f, 6f, fillPaint)
 
-                val bitmap = decodePhotoThumbnail(jpegBytes, tileWidth.toInt(), tileHeight.toInt())
+                val bitmap = decodePhotoThumbnail(jpegBytes, tileWidth.toInt())
                 if (bitmap != null) {
                     val clipPath = Path().apply {
                         addRoundRect(rect, 6f, 6f, Path.Direction.CW)
@@ -673,15 +673,17 @@ class HealthReportPdfGenerator(
         private fun decodePhotoThumbnail(
             jpegBytes: ByteArray,
             targetWidthPx: Int,
-            targetHeightPx: Int,
         ): Bitmap? {
             val bounds = BitmapFactory.Options().apply { inJustDecodeBounds = true }
             BitmapFactory.decodeByteArray(jpegBytes, 0, jpegBytes.size, bounds)
             if (bounds.outWidth <= 0 || bounds.outHeight <= 0) return null
             var sample = 1
             // Aim for ~2x the target so the final crop stays crisp.
+            // Photo height is fixed at PHOTO_HEIGHT_PT (120pt) — read
+            // from the constant directly rather than threading another
+            // parameter through that's always the same value.
             val targetW = targetWidthPx.coerceAtLeast(1) * 2
-            val targetH = targetHeightPx.coerceAtLeast(1) * 2
+            val targetH = PHOTO_HEIGHT_PT.toInt() * 2
             while (bounds.outWidth / (sample * 2) >= targetW &&
                 bounds.outHeight / (sample * 2) >= targetH
             ) {
@@ -849,7 +851,7 @@ class HealthReportPdfGenerator(
             val avgLabel = if (avg == null) {
                 "—"
             } else {
-                "${"%.2f".format(java.util.Locale.UK, avg)} / 10"
+                "${"%.2f".format(Locale.UK, avg)} / 10"
             }
             drawSingleLineViaBitmap(avgLabel, rightX, currentY + 66f, summaryValuePaint)
 
@@ -924,7 +926,6 @@ class HealthReportPdfGenerator(
                 } else {
                     buildStaticLayout(chunkText, paint, width)
                 }
-                val realHeight = chunkLayout.height.coerceIn(1, chunkHeight.coerceAtLeast(1))
                 val drawHeight = chunkLayout.height.coerceAtLeast(1)
                 renderLayoutViaBitmap(chunkLayout, width, drawHeight)
                 currentY += drawHeight + 2f
@@ -932,9 +933,6 @@ class HealthReportPdfGenerator(
                 if (remaining.isNotEmpty()) {
                     closePage(); openPage()
                 }
-                // `realHeight` kept to silence an unused-var warning in
-                // some compiler combos — no behavioural impact.
-                @Suppress("UNUSED_VARIABLE") val _touch = realHeight
             }
         }
 
