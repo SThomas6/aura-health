@@ -1,6 +1,5 @@
 package com.example.mob_dev_portfolio
 
-import androidx.compose.ui.text.SpanStyle
 import androidx.compose.ui.text.font.FontStyle
 import androidx.compose.ui.text.font.FontWeight
 import com.example.mob_dev_portfolio.ui.analysis.MarkdownBlock

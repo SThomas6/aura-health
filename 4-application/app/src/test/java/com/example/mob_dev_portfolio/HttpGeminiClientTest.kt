@@ -4,7 +4,6 @@ import com.example.mob_dev_portfolio.data.ai.AnalysisRequest
 import com.example.mob_dev_portfolio.data.ai.AnalysisResult
 import com.example.mob_dev_portfolio.data.ai.HttpGeminiClient
 import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.test.runTest
 import okhttp3.OkHttpClient
 import okhttp3.mockwebserver.MockResponse

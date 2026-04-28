@@ -8,7 +8,6 @@ import com.example.mob_dev_portfolio.AuraApplication
 import com.example.mob_dev_portfolio.BuildConfig
 import com.example.mob_dev_portfolio.data.health.HealthConnectMetric
 import com.example.mob_dev_portfolio.data.health.HealthConnectService
-import com.example.mob_dev_portfolio.data.health.HealthMetricCategory
 import com.example.mob_dev_portfolio.data.health.HealthPreferencesRepository
 import com.example.mob_dev_portfolio.data.health.HealthSampleSeeder
 import kotlinx.coroutines.flow.MutableStateFlow

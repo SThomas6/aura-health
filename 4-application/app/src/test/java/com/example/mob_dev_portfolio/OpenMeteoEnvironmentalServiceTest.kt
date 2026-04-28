@@ -3,7 +3,6 @@ package com.example.mob_dev_portfolio
 import com.example.mob_dev_portfolio.data.environment.EnvironmentalFetchResult
 import com.example.mob_dev_portfolio.data.environment.OpenMeteoEnvironmentalService
 import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.test.runTest
 import okhttp3.OkHttpClient
 import okhttp3.mockwebserver.Dispatcher

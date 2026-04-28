@@ -73,6 +73,8 @@ class HistoryViewModel(
     )
 
     val logs: StateFlow<List<SymptomLog>> = _filter
+        // StateFlow already deduplicates via operator fusion, so an
+        // explicit `distinctUntilChanged()` here would be a no-op.
         .flatMapLatest { filter -> repository.observeFiltered(filter) }
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000L), emptyList())
 
@@ -126,14 +128,6 @@ class HistoryViewModel(
         val lo = min.coerceIn(LogValidator.MIN_SEVERITY, LogValidator.MAX_SEVERITY)
         val hi = max.coerceIn(lo, LogValidator.MAX_SEVERITY)
         _filter.update { it.copy(minSeverity = lo, maxSeverity = hi) }
-    }
-
-    fun onStartAfterChange(epochMillis: Long?) {
-        _filter.update { it.copy(startAfterEpochMillis = epochMillis) }
-    }
-
-    fun onStartBeforeChange(epochMillis: Long?) {
-        _filter.update { it.copy(startBeforeEpochMillis = epochMillis) }
     }
 
     fun onDateRangeChange(startAfter: Long?, startBefore: Long?) {

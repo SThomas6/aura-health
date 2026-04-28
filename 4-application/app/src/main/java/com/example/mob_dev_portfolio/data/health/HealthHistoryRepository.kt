@@ -57,9 +57,9 @@ class HealthHistoryRepository(
     }
 
     enum class Bucket(val stepSeconds: Long) {
-        Hour(stepSeconds = 3_600L),
-        Day(stepSeconds = 86_400L),
-        Week(stepSeconds = 604_800L),
+        Hour(stepSeconds = SECONDS_PER_HOUR),
+        Day(stepSeconds = SECONDS_PER_DAY),
+        Week(stepSeconds = SECONDS_PER_WEEK),
     }
 
     /** A single point on a time-series chart. */
@@ -547,5 +547,13 @@ class HealthHistoryRepository(
 
     companion object {
         private const val TAG = "HealthHistoryRepo"
+
+        // Named time-axis constants — the bucket sizes drive both the
+        // alignment maths in [buckets] and the index lookup in
+        // [indexOfBucket], so giving them names instead of bare literals
+        // makes "why is this 86_400" obvious at every call site.
+        private const val SECONDS_PER_HOUR: Long = 3_600L
+        private const val SECONDS_PER_DAY: Long = 24L * SECONDS_PER_HOUR
+        private const val SECONDS_PER_WEEK: Long = 7L * SECONDS_PER_DAY
     }
 }

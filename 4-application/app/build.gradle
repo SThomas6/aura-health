@@ -97,8 +97,13 @@ android {
 
     packaging {
         resources {
-            // `excludes` is the deprecated property; the Set form
-            // `excludes.add(...)` is the current AGP DSL.
+            // The Groovy IDE inspection flags `excludes` as deprecated,
+            // but the `getExcludes()` getter + `.add(...)` mutation
+            // pattern is the documented AGP 8.x form (the deprecation
+            // is on the *setter* `excludes = ...` / compound `+=` form,
+            // not on read access). Gradle itself emits no deprecation
+            // warning for this line; the IDE rule is stale.
+            //noinspection GrDeprecatedAPIUsage
             excludes.add('/META-INF/{AL2.0,LGPL2.1}')
         }
     }
@@ -164,8 +169,8 @@ dependencies {
 
     implementation 'androidx.navigation:navigation-compose:2.9.8'
 
-    implementation 'org.jetbrains.kotlinx:kotlinx-serialization-json:1.7.3'
-    implementation 'org.jetbrains.kotlinx:kotlinx-coroutines-android:1.8.1'
+    implementation 'org.jetbrains.kotlinx:kotlinx-serialization-json:1.8.1'
+    implementation 'org.jetbrains.kotlinx:kotlinx-coroutines-android:1.9.0'
 
     implementation 'androidx.room:room-runtime:2.8.4'
     implementation 'androidx.room:room-ktx:2.8.4'
@@ -202,7 +207,7 @@ dependencies {
 
     testImplementation 'junit:junit:4.13.2'
     testImplementation 'androidx.work:work-testing:2.11.2'
-    testImplementation 'org.jetbrains.kotlinx:kotlinx-coroutines-test:1.8.1'
+    testImplementation 'org.jetbrains.kotlinx:kotlinx-coroutines-test:1.9.0'
     testImplementation 'androidx.arch.core:core-testing:2.2.0'
     testImplementation 'com.squareup.okhttp3:mockwebserver:4.12.0'
     // Real JSONObject impl for unit tests — Android's shipped stub returns

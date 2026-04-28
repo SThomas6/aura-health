@@ -149,19 +149,6 @@ class MedicationListViewModel(
         }
     }
 
-    fun setGlobalEnabled(enabled: Boolean) {
-        viewModelScope.launch {
-            uiPrefs.setMedicationRemindersEnabled(enabled)
-            // When disabling globally, cancel every armed alarm so no
-            // stale fire-time sits in the background — the receiver
-            // short-circuits on the pref too, but cancelling is free and
-            // frees up AlarmManager slots (FR-MR-08).
-            val reminders = repository.listAll()
-            if (enabled) scheduler.rescheduleAll(reminders, now())
-            else scheduler.cancelAll(reminders.map { it.id })
-        }
-    }
-
     private fun frequencyLabel(reminder: MedicationReminder): String = when (val f = reminder.frequency) {
         ReminderFrequency.Daily -> "Every day"
         is ReminderFrequency.WeeklyDays -> NextFireCalculator.maskToLabel(f.daysMask)

@@ -199,7 +199,7 @@ fun OnboardingScreen(
                 .testTag("onboarding_screen"),
             verticalArrangement = Arrangement.spacedBy(16.dp),
         ) {
-            StepIndicator(current = step, total = TOTAL_STEPS)
+            StepIndicator(current = step)
             when (step) {
                 0 -> WelcomeCard()
                 1 -> PermissionCard(
@@ -293,16 +293,16 @@ fun OnboardingScreen(
     }
 }
 
-/** 5 steps: welcome, notifications, location, health connect, ready. */
+/** 6 steps: welcome, notifications, location, health connect, conditions, ready. */
 private const val TOTAL_STEPS: Int = 6
 
 @Composable
-private fun StepIndicator(current: Int, total: Int) {
+private fun StepIndicator(current: Int) {
     Row(
         horizontalArrangement = Arrangement.spacedBy(6.dp),
         modifier = Modifier.fillMaxWidth(),
     ) {
-        repeat(total) { i ->
+        repeat(TOTAL_STEPS) { i ->
             Box(
                 modifier = Modifier
                     .height(4.dp)

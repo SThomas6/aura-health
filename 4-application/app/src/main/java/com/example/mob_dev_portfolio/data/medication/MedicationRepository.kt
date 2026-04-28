@@ -1,8 +1,8 @@
 package com.example.mob_dev_portfolio.data.medication
 
+import android.util.Log
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.map
-import java.time.LocalTime
 
 /**
  * Status of a single dose event.
@@ -66,10 +66,7 @@ data class MedicationReminder(
     val timeOfDayMinutes: Int,
     val enabled: Boolean,
     val createdAtEpochMillis: Long,
-) {
-    /** Convenience for the editor form + label formatters. */
-    val timeOfDay: LocalTime get() = LocalTime.of(timeOfDayMinutes / 60, timeOfDayMinutes % 60)
-}
+)
 
 data class DoseEvent(
     val id: Long,
@@ -171,7 +168,17 @@ private fun MedicationReminderEntity.toDomain(): MedicationReminder {
         KIND_ONE_OFF -> ReminderFrequency.OneOff(
             oneOffAtEpochMillis ?: error("ONE_OFF reminder missing oneOffAtEpochMillis"),
         )
-        else -> ReminderFrequency.Daily
+        else -> {
+            // Unknown discriminator usually means a future schema version
+            // wrote a frequency kind this build doesn't understand. Log
+            // loudly so a stale install doesn't silently coerce every
+            // reminder to Daily without anyone noticing during QA.
+            Log.w(
+                "MedicationRepository",
+                "Unknown frequencyKind='$frequencyKind' for reminder id=$id; defaulting to Daily",
+            )
+            ReminderFrequency.Daily
+        }
     }
     return MedicationReminder(
         id = id,

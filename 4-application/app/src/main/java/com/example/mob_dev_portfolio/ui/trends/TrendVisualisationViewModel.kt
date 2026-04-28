@@ -88,19 +88,6 @@ enum class TrendRange(
     SixMonths("6m", 180, HealthHistoryRepository.Range.HalfYear, BucketUnit.Month),
     Year("1y", 365, HealthHistoryRepository.Range.Year, BucketUnit.Month);
 
-    /**
-     * Approximate bucket width in seconds. Used only for fuzzy
-     * comparisons (HC nearest-neighbour matching) — axis layout walks
-     * calendar units via [BucketUnit], so monthly buckets don't suffer
-     * from the 30-day approximation drift at year boundaries.
-     */
-    val approxBucketSeconds: Long get() = when (bucketUnit) {
-        BucketUnit.Hour -> 3_600L
-        BucketUnit.Day -> 86_400L
-        BucketUnit.Week -> 604_800L
-        BucketUnit.Month -> 2_592_000L
-    }
-
     companion object {
         // Week is the punchiest view — one week of daily buckets lets a
         // user eyeball trends without the "where's the line?" confusion
@@ -206,6 +193,17 @@ class TrendVisualisationViewModel(
     private val clock: Clock = Clock.systemDefaultZone(),
     private val zone: ZoneId = ZoneId.systemDefault(),
 ) : ViewModel() {
+
+    // Pure axis + bucketing maths lives in its own class so it can be
+    // unit-tested without standing up the Flow pipeline. The VM just
+    // orchestrates state and delegates the maths.
+    private val bucketing = TrendBucketing(zone)
+    private fun buildAxis(range: TrendRange, endInstant: Instant): TrendBucketing.Axis =
+        bucketing.buildAxis(range, endInstant)
+    private fun bucketAverage(
+        records: List<Pair<Long, Double>>,
+        axis: TrendBucketing.Axis,
+    ): List<TrendBucket> = bucketing.bucketAverage(records, axis)
 
     private val selectedRange = MutableStateFlow(TrendRange.Default)
     private val selectedSymptom = MutableStateFlow<String?>(null)
@@ -499,83 +497,6 @@ class TrendVisualisationViewModel(
     // ── Series construction ───────────────────────────────────────────
 
     /**
-     * Pre-computed axis for a render pass. We store each bucket's
-     * [bucketStarts] and [bucketEnds] separately rather than a single
-     * "bucket size" so the monthly granularity (where a bucket is
-     * 28–31 days long) falls out naturally instead of needing special
-     * cases in every downstream consumer.
-     */
-    private data class Axis(
-        val bucketStarts: List<Instant>,
-        val bucketEnds: List<Instant>,
-        val unit: BucketUnit,
-    ) {
-        val size: Int get() = bucketStarts.size
-    }
-
-    /**
-     * Walk calendar units from the aligned window start up to
-     * [endInstant], emitting one bucket per unit. Starts + ends are
-     * paired 1:1 so the bucketer can do an O(log N) binary search for
-     * the bucket any sample falls into.
-     */
-    private fun buildAxis(range: TrendRange, endInstant: Instant): Axis {
-        val rawStart = endInstant.minus(Duration.ofDays(range.days.toLong()))
-        val alignedStart = alignDown(rawStart, range.bucketUnit)
-        val starts = mutableListOf<Instant>()
-        val ends = mutableListOf<Instant>()
-        var cursor = alignedStart
-        // Safety cap — a monthly 1-year view is 13 buckets, a daily 1-month
-        // view is 31, an hourly 1-day view is 25. 512 is comfortably larger
-        // than anything legitimate and bounds a runaway loop from e.g. a
-        // broken advance() returning the same instant twice.
-        var guard = 0
-        while (!cursor.isAfter(endInstant) && guard < 512) {
-            val next = advance(cursor, range.bucketUnit)
-            starts += cursor
-            ends += next
-            cursor = next
-            guard++
-        }
-        if (starts.isEmpty()) {
-            // Extreme edge case (e.g. endInstant == alignedStart and unit
-            // makes advance strictly forward): emit at least one bucket so
-            // downstream code can render an empty chart rather than NPE.
-            starts += alignedStart
-            ends += advance(alignedStart, range.bucketUnit)
-        }
-        return Axis(starts, ends, range.bucketUnit)
-    }
-
-    private fun alignDown(instant: Instant, unit: BucketUnit): Instant {
-        val zoned = instant.atZone(zone)
-        return when (unit) {
-            BucketUnit.Hour -> zoned.truncatedTo(java.time.temporal.ChronoUnit.HOURS).toInstant()
-            BucketUnit.Day -> zoned.toLocalDate().atStartOfDay(zone).toInstant()
-            BucketUnit.Week -> {
-                // ISO week: Monday-start. Align to this week's Monday.
-                val dow = zoned.dayOfWeek.value - 1
-                zoned.toLocalDate().minusDays(dow.toLong()).atStartOfDay(zone).toInstant()
-            }
-            BucketUnit.Month -> zoned.toLocalDate()
-                .withDayOfMonth(1)
-                .atStartOfDay(zone)
-                .toInstant()
-        }
-    }
-
-    /** Advance by exactly one [unit] starting from [instant]. */
-    private fun advance(instant: Instant, unit: BucketUnit): Instant {
-        val zoned = instant.atZone(zone)
-        return when (unit) {
-            BucketUnit.Hour -> instant.plusSeconds(3_600L)
-            BucketUnit.Day -> zoned.toLocalDate().plusDays(1).atStartOfDay(zone).toInstant()
-            BucketUnit.Week -> zoned.toLocalDate().plusWeeks(1).atStartOfDay(zone).toInstant()
-            BucketUnit.Month -> zoned.toLocalDate().plusMonths(1).atStartOfDay(zone).toInstant()
-        }
-    }
-
-    /**
      * Build the symptom series. If a log has an [SymptomLog.endEpochMillis],
      * treat it as spanning start..end and emit one sample per bucket
      * step inside the span — the chart then shows one point per day for
@@ -584,7 +505,7 @@ class TrendVisualisationViewModel(
     private fun buildSymptomSeries(
         logs: List<SymptomLog>,
         symptomName: String,
-        axis: Axis,
+        axis: TrendBucketing.Axis,
     ): TrendSeries {
         val filtered = logs.filter { it.symptomName.equals(symptomName, ignoreCase = true) }
         // Always step multi-day expansions at day resolution — this
@@ -667,7 +588,7 @@ class TrendVisualisationViewModel(
     private fun buildEnvSeriesFromSamples(
         samples: List<EnvironmentalSample>,
         option: OverlayOption,
-        axis: Axis,
+        axis: TrendBucketing.Axis,
     ): TrendSeries {
         val extractor: (EnvironmentalSample) -> Double? = when (option.kind) {
             OverlayKind.EnvHumidity -> { s -> s.humidityPercent?.toDouble() }
@@ -697,7 +618,7 @@ class TrendVisualisationViewModel(
         metric: HealthConnectMetric,
         option: OverlayOption,
         range: TrendRange,
-        axis: Axis,
+        axis: TrendBucketing.Axis,
         endInstant: Instant,
     ): TrendSeries {
         val hc = healthHistoryRepository.readSeries(metric, range.healthRange, endInstant)
@@ -724,54 +645,6 @@ class TrendVisualisationViewModel(
             rawMin = rawValues.minOrNull(),
             rawMax = rawValues.maxOrNull(),
         )
-    }
-
-    /**
-     * Average the samples into the axis buckets. A bucket with no
-     * samples emits a null raw value — the chart draws null as a gap
-     * rather than a misleading zero.
-     */
-    /**
-     * Average the samples into the axis buckets. A bucket with no
-     * samples emits a null raw value — the chart draws null as a gap
-     * rather than a misleading zero.
-     *
-     * Uses binary search against the bucket start/end arrays so the
-     * variable-width monthly buckets (28–31 days) route samples
-     * correctly. Fixed-width bucket sizes would still work with a plain
-     * `(delta / stepMillis).toInt()`, but a single unified path is
-     * easier to reason about than two divergent branches.
-     */
-    private fun bucketAverage(
-        records: List<Pair<Long, Double>>,
-        axis: Axis,
-    ): List<TrendBucket> {
-        if (axis.bucketStarts.isEmpty()) return emptyList()
-        val startsMs = LongArray(axis.size) { axis.bucketStarts[it].toEpochMilli() }
-        val endsMs = LongArray(axis.size) { axis.bucketEnds[it].toEpochMilli() }
-        val sums = DoubleArray(axis.size)
-        val counts = IntArray(axis.size)
-        records.forEach { (time, value) ->
-            // Find the bucket where startsMs[i] <= time < endsMs[i].
-            var lo = 0
-            var hi = axis.size - 1
-            var idx = -1
-            while (lo <= hi) {
-                val mid = (lo + hi) ushr 1
-                when {
-                    time < startsMs[mid] -> hi = mid - 1
-                    time >= endsMs[mid] -> lo = mid + 1
-                    else -> { idx = mid; break }
-                }
-            }
-            if (idx >= 0) {
-                sums[idx] += value
-                counts[idx]++
-            }
-        }
-        return axis.bucketStarts.mapIndexed { i, start ->
-            TrendBucket(start, if (counts[i] == 0) null else sums[i] / counts[i])
-        }
     }
 
     private fun granularityFor(range: TrendRange): EnvironmentalHistoryService.Granularity =
