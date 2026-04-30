@@ -1,6 +1,5 @@
 package com.example.mob_dev_portfolio
 
-import androidx.compose.ui.text.SpanStyle
 import androidx.compose.ui.text.font.FontStyle
 import androidx.compose.ui.text.font.FontWeight
 import com.example.mob_dev_portfolio.ui.analysis.MarkdownBlock
@@ -147,7 +146,7 @@ class MarkdownRendererTest {
         val spans = annotated.spanStyles
         assertEquals(1, spans.size)
         val span = spans[0]
-        assertEquals(FontWeight.Bold, (span.item as SpanStyle).fontWeight)
+        assertEquals(FontWeight.Bold, span.item.fontWeight)
         assertEquals("strong", annotated.text.substring(span.start, span.end))
     }
 
@@ -155,7 +154,7 @@ class MarkdownRendererTest {
     fun underscore_bold_alternate_form_is_supported() {
         val annotated = renderInline("__heavy__")
         assertEquals("heavy", annotated.text)
-        assertEquals(FontWeight.Bold, (annotated.spanStyles[0].item as SpanStyle).fontWeight)
+        assertEquals(FontWeight.Bold, annotated.spanStyles[0].item.fontWeight)
     }
 
     @Test
@@ -163,7 +162,7 @@ class MarkdownRendererTest {
         val annotated = renderInline("maybe *soft* note")
         assertEquals("maybe soft note", annotated.text)
         val span = annotated.spanStyles.single()
-        assertEquals(FontStyle.Italic, (span.item as SpanStyle).fontStyle)
+        assertEquals(FontStyle.Italic, span.item.fontStyle)
         assertEquals("soft", annotated.text.substring(span.start, span.end))
     }
 
@@ -183,7 +182,7 @@ class MarkdownRendererTest {
         val annotated = renderInline("**big *and* loud**")
         // Outer bold covers the inner italic word plus the wrappers.
         assertEquals("big and loud", annotated.text)
-        val styles = annotated.spanStyles.map { it.item as SpanStyle }
+        val styles = annotated.spanStyles.map { it.item }
         assertTrue("expected a bold span", styles.any { it.fontWeight == FontWeight.Bold })
         assertTrue("expected an italic span", styles.any { it.fontStyle == FontStyle.Italic })
     }

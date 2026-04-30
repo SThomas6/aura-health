@@ -7,7 +7,8 @@ import kotlinx.coroutines.flow.asStateFlow
 /**
  * Pending-action holder for notification deep-links.
  *
- * The subtle constraint here is that on a cold start [MainActivity] calls
+ * The subtle constraint here is that on a cold start
+ * [com.example.mob_dev_portfolio.MainActivity] calls
  * [emit] inside `onCreate` *before* `setContent` has run — so Compose hasn't
  * had a chance to subscribe yet. A `SharedFlow(replay = 0)` drops events in
  * that window (its buffer is only for slow subscribers, not late ones),

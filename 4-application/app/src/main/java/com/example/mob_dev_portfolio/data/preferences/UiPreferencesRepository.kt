@@ -14,12 +14,28 @@ import com.example.mob_dev_portfolio.ui.log.LogValidator
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.map
 
+/** Three-way colour scheme switch. `System` follows the device-level dark mode. */
 enum class ThemeMode { System, Light, Dark }
 
+/** Snapshot of the UI-level preference keys aggregated for the theme controller. */
 data class UiPreferences(
     val themeMode: ThemeMode = ThemeMode.System,
 )
 
+/**
+ * DataStore-backed repository for UI-only preferences (theme, onboarding
+ * gate, biometric lock, history filter, last-used trend overlay,
+ * medication reminders kill-switch).
+ *
+ * Lives in the unencrypted Preferences DataStore (not SQLCipher) because:
+ *   • None of the keys are PII or health data — they're UI state.
+ *   • The biometric-lock + onboarding gate must be readable *before* the
+ *     SQLCipher DB is unlocked, so they can't depend on it.
+ *
+ * The class is `open` so the test layer can subclass and stub flows
+ * without spinning up a real DataStore — the rest of the codebase uses
+ * the same pattern (see [UserProfileRepository], [HealthPreferencesRepository]).
+ */
 open class UiPreferencesRepository(
     private val dataStore: DataStore<Preferences>,
 ) {
@@ -41,7 +57,7 @@ open class UiPreferencesRepository(
      * First-launch onboarding state.
      *
      * The flag flips to `true` once the user steps through the welcome +
-     * permission-rationale screens, after which [AuraApp] takes over as
+     * permission-rationale screens, after which [com.example.mob_dev_portfolio.ui.AuraApp] takes over as
      * the root UI. A dedicated boolean (rather than reusing, say, an
      * installed-version int) means clearing the flag remotely in a
      * future migration is as simple as deleting the key.

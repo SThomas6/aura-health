@@ -8,6 +8,7 @@ import androidx.datastore.preferences.preferencesDataStore
 import com.example.mob_dev_portfolio.data.AuraDatabase
 import com.example.mob_dev_portfolio.data.SymptomLogRepository
 import com.example.mob_dev_portfolio.data.SymptomLogSeeder
+import com.example.mob_dev_portfolio.data.condition.HealthConditionSeeder
 import com.example.mob_dev_portfolio.data.doctor.DoctorVisitRepository
 import com.example.mob_dev_portfolio.data.doctor.DoctorVisitSeeder
 import androidx.work.WorkManager
@@ -56,6 +57,20 @@ private val Context.userProfileStore: DataStore<Preferences> by preferencesDataS
 private val Context.analysisResultStoreDs: DataStore<Preferences> by preferencesDataStore(name = "aura_analysis_result")
 private val Context.healthPreferencesStore: DataStore<Preferences> by preferencesDataStore(name = "aura_health_prefs")
 
+/**
+ * Manual dependency-injection container that exposes every long-lived
+ * collaborator the app needs. Modelled as an interface (with [DefaultAppContainer]
+ * as the production implementation) so tests can swap in fakes without
+ * pulling in a heavyweight DI framework like Hilt — this stays in line
+ * with the assessment's "demonstrate understanding" goal rather than
+ * hiding the wiring behind generated code.
+ *
+ * All members are exposed as `val` so the call sites can rely on a
+ * single instance per process, matching the lifetime of the
+ * [android.app.Application]. Lazy initialisation in the implementation
+ * keeps cold-start time down: nothing here is constructed until the
+ * first dependent feature is reached.
+ */
 interface AppContainer {
     val symptomLogRepository: SymptomLogRepository
     val uiPreferencesRepository: UiPreferencesRepository
@@ -188,8 +203,20 @@ interface AppContainer {
     val doctorVisitSeeder: DoctorVisitSeeder
 
     /**
+     * Companion seeder for user-declared health conditions. Distinct
+     * from the doctor seeder: doctor-confirmed diagnoses are tied to a
+     * visit, whereas conditions are standing facts the user asserts
+     * about themselves (e.g. "Migraine"). Runs after the symptom seed
+     * lands so it can pin matching logs to seeded conditions, giving
+     * the editor's "Group under condition" picker and the History
+     * grouped sections something to render on first launch.
+     */
+    val healthConditionSeeder: HealthConditionSeeder
+
+    /**
      * Room-backed store of medication reminders + their append-only dose
-     * history. Writes from the editor UI and the [MedicationReminderReceiver];
+     * history. Writes from the editor UI and the
+     * [com.example.mob_dev_portfolio.reminders.MedicationReminderReceiver];
      * reads drive the list/history screens and the Home preview card.
      */
     val medicationRepository: MedicationRepository
@@ -231,6 +258,14 @@ interface AppContainer {
     val healthConditionRepository: com.example.mob_dev_portfolio.data.condition.HealthConditionRepository
 }
 
+/**
+ * Production implementation of [AppContainer]. Owns the encrypted Room
+ * database and lazily constructs every collaborator on first access.
+ * The constructor takes the host [Context] (we always store the
+ * Application context to avoid leaking an Activity) plus an injectable
+ * [DatabaseQuarantine] so tests can intercept the legacy-database
+ * move-aside behaviour.
+ */
 class DefaultAppContainer(
     context: Context,
     private val quarantine: DatabaseQuarantine = FilesystemQuarantine.Default,
@@ -239,6 +274,13 @@ class DefaultAppContainer(
 
     private val database by lazy { buildDatabase() }
 
+    /**
+     * Resolves the SQLCipher passphrase, handles the three startup
+     * scenarios (reused key, fresh key on first launch, fresh key after
+     * corruption), and either imports legacy plaintext rows or
+     * quarantines a corrupt database before opening the encrypted
+     * Room instance. Returns the ready-to-use database.
+     */
     private fun buildDatabase(): AuraDatabase {
         val result = runBlocking { DatabasePassphraseProvider.obtain(appContext) }
         val primary = File(appContext.getDatabasePath(PRIMARY_DB_NAME).absolutePath)
@@ -407,6 +449,13 @@ class DefaultAppContainer(
         )
     }
 
+    override val healthConditionSeeder: HealthConditionSeeder by lazy {
+        HealthConditionSeeder(
+            conditionRepository = healthConditionRepository,
+            symptomLogRepository = symptomLogRepository,
+        )
+    }
+
     override val medicationRepository: MedicationRepository by lazy {
         MedicationRepository(
             reminderDao = database.medicationReminderDao(),
@@ -451,10 +500,28 @@ class DefaultAppContainer(
     }
 }
 
+/**
+ * Strategy used by [DefaultAppContainer] to preserve a legacy or
+ * corrupted database file rather than deleting it outright. Defining
+ * this as an interface (with the [FilesystemQuarantine] default
+ * implementation) keeps the destructive rename out of unit tests and
+ * lets us assert the exact set of move-aside calls in instrumented
+ * tests without hitting the filesystem.
+ */
 interface DatabaseQuarantine {
     fun moveAside(databasesDir: File, tag: String)
 }
 
+/**
+ * On-disk quarantine that renames the primary database and its
+ * SQLite sidecar files (-wal/-shm/-journal) to a timestamped suffix so
+ * the user never silently loses data — even if Room can't open the
+ * file, the original bytes remain on disk for forensic recovery.
+ *
+ * The constructor parameters are seams for testing: [renamer] lets a
+ * test simulate a rename failure to exercise the throw path, and
+ * [clock] makes the timestamp suffix deterministic.
+ */
 class FilesystemQuarantine(
     private val renamer: (File, File) -> Boolean = { source, target -> source.renameTo(target) },
     private val clock: () -> Long = { System.currentTimeMillis() },

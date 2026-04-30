@@ -7,6 +7,18 @@ import androidx.room.Query
 import androidx.room.Update
 import kotlinx.coroutines.flow.Flow
 
+/**
+ * Room access for the doctor-diagnosis half of the Doctor Visits
+ * feature. A diagnosis is one issue the doctor flagged at a visit
+ * (parent: [DoctorVisitEntity]); the join table maps each diagnosis
+ * to the symptom logs the user wants annotated with that label so the
+ * AI prompt-builder can mark them as already-explained context.
+ *
+ * Reactive `Flow` reads drive the live UI; `suspend` snapshots feed
+ * the AI pipeline. The split-query pattern (`observeX` / `listX`)
+ * keeps the cost of each access predictable — the AI worker doesn't
+ * subscribe to a long-lived Flow it would have to immediately cancel.
+ */
 @Dao
 interface DoctorDiagnosisDao {
 

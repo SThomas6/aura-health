@@ -41,17 +41,42 @@ data class MedicationListUiState(
     val globalEnabled: Boolean = true,
 )
 
+/**
+ * UI projection of a single reminder row including the resolved
+ * next-fire instant (already converted to wall-clock time for the user's
+ * zone) and a pre-formatted frequency label. Computed in the VM so the
+ * Composable can render in O(1) per row without doing date math.
+ */
 data class ReminderRow(
     val reminder: MedicationReminder,
     val nextFire: Instant?,
     val frequencyLabel: String,
 )
 
+/**
+ * UI projection of a single dose-history entry. [medicationName] is
+ * resolved against the live reminders list so a user who deletes a
+ * reminder still sees a sensible "(deleted)" placeholder rather than a
+ * raw foreign-key id.
+ */
 data class HistoryRow(
     val event: DoseEvent,
     val medicationName: String,
 )
 
+/**
+ * ViewModel for the Medication Reminders list + 30-day dose history.
+ *
+ * Drives both lanes of [MedicationListScreen] from a single combined
+ * StateFlow so the screen recomposes atomically (the list and the
+ * history can never disagree about whether a reminder still exists).
+ *
+ * The "next fire" instant is computed in the VM via [NextFireCalculator]
+ * rather than persisted on the row — that keeps the data model correct
+ * across timezone changes, daylight saving boundaries, and "user changed
+ * the device clock" without the cost of recomputing timestamps in
+ * triggers.
+ */
 class MedicationListViewModel(
     private val repository: MedicationRepository,
     private val uiPrefs: UiPreferencesRepository,
@@ -99,6 +124,11 @@ class MedicationListViewModel(
         MedicationListUiState(),
     )
 
+    /**
+     * Toggles whether a reminder fires. We persist the bit FIRST then
+     * (re-)schedule, so a crash mid-operation can't leave the alarm
+     * manager primed for a row the DB believes is paused.
+     */
     fun setEnabled(reminder: MedicationReminder, enabled: Boolean) {
         viewModelScope.launch {
             repository.setEnabled(reminder.id, enabled)
@@ -108,6 +138,11 @@ class MedicationListViewModel(
         }
     }
 
+    /**
+     * Deletes a reminder and cancels its alarm. Cancel happens BEFORE
+     * the DB delete so we never end up with a stale alarm pointing at a
+     * non-existent row id.
+     */
     fun delete(reminder: MedicationReminder) {
         viewModelScope.launch {
             scheduler.cancel(reminder.id)
@@ -132,7 +167,7 @@ class MedicationListViewModel(
      * In-app equivalent of the "Snooze 15 min" action. Marks the
      * current event SNOOZED and arms a fresh alarm 15 minutes out
      * regardless of the reminder's recurrence — identical path to
-     * [MedicationActionReceiver]'s handling. Returning the
+     * [com.example.mob_dev_portfolio.reminders.MedicationActionReceiver]'s handling. Returning the
      * snooze-until instant lets the UI surface "Snoozed until HH:MM"
      * without a second read.
      */
@@ -146,19 +181,6 @@ class MedicationListViewModel(
                 nowMs + MedicationReminderScheduler.SNOOZE_MILLIS,
             )
             notifier.cancelNotification(event.medicationId)
-        }
-    }
-
-    fun setGlobalEnabled(enabled: Boolean) {
-        viewModelScope.launch {
-            uiPrefs.setMedicationRemindersEnabled(enabled)
-            // When disabling globally, cancel every armed alarm so no
-            // stale fire-time sits in the background — the receiver
-            // short-circuits on the pref too, but cancelling is free and
-            // frees up AlarmManager slots (FR-MR-08).
-            val reminders = repository.listAll()
-            if (enabled) scheduler.rescheduleAll(reminders, now())
-            else scheduler.cancelAll(reminders.map { it.id })
         }
     }
 
@@ -215,8 +237,27 @@ data class MedicationEditorUiState(
         }
 }
 
+/**
+ * UI-facing simplification of [ReminderFrequency] for the editor's
+ * radio buttons. The VM round-trips between this enum and the sealed
+ * domain type — the editor never deals with the sealed hierarchy
+ * directly because radio groups don't model "WeeklyDays + mask" cleanly.
+ */
 enum class FrequencyKind { Daily, Weekly, OneOff }
 
+/**
+ * ViewModel for the Add/Edit medication reminder screen.
+ *
+ * Constructed via [factory] which injects either a `null` reminderId
+ * (create mode) or an existing id (edit mode). On edit-mode init the
+ * existing row is read once and translated into [MedicationEditorUiState]
+ * — subsequent edits live entirely in memory until the user hits Save.
+ *
+ * [save] persists the row, then arms the alarm via the scheduler in the
+ * same coroutine so a successful save is guaranteed to reach the alarm
+ * manager. On failure we surface a user-readable error rather than
+ * crashing — the form stays open and the user can retry.
+ */
 class MedicationEditorViewModel(
     private val reminderId: Long?,
     private val repository: MedicationRepository,

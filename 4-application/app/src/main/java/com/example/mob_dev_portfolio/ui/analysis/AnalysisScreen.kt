@@ -14,9 +14,9 @@ import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
-import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -64,6 +64,21 @@ import java.util.Date
 import java.util.Locale
 import java.util.TimeZone
 
+/**
+ * Form for kicking off a new AI analysis run.
+ *
+ * Reached from the Analysis tab's FAB (or the empty-state CTA on first
+ * use). The screen collects the user's full name, date of birth, and any
+ * additional context they want the model to consider, then enqueues the
+ * background `AnalysisWorker`. The worker handles the network call and
+ * persistence, and posts a notification on completion — that's why this
+ * screen also handles the `POST_NOTIFICATIONS` runtime grant inline.
+ *
+ * The "ON DEVICE ONLY" pill and surrounding copy explicitly call out
+ * that names + raw DOB are stripped before the request — the prompt
+ * builder anonymises them to an age range. See the privacy posture
+ * documented on the redesign hero card.
+ */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun AnalysisScreen(
@@ -326,18 +341,11 @@ private fun TriggerRow(
             .testTag("analysis_trigger"),
     ) {
         if (loading) {
-            CircularProgressIndicator(
-                strokeWidth = 2.dp,
-                modifier = Modifier
-                    .height(20.dp)
-                    .testTag("analysis_loading_indicator"),
-            )
-            Spacer(Modifier.height(4.dp))
-            Text("  Analysing…")
+            Text("Analysing…")
         } else {
             Icon(Icons.Filled.AutoAwesome, contentDescription = null)
-            Spacer(Modifier.height(4.dp))
-            Text("  Run AI analysis")
+            Spacer(Modifier.width(8.dp))
+            Text("Run AI analysis")
         }
     }
 }
@@ -355,10 +363,15 @@ private fun AnalysisResultArea(phase: AnalysisPhase) {
                         .testTag("analysis_loading_card"),
                     verticalAlignment = Alignment.CenterVertically,
                 ) {
-                    CircularProgressIndicator(strokeWidth = 2.dp, modifier = Modifier.height(24.dp))
-                    Spacer(Modifier.height(0.dp))
+                    CircularProgressIndicator(
+                        strokeWidth = 2.dp,
+                        modifier = Modifier
+                            .size(24.dp)
+                            .testTag("analysis_loading_indicator"),
+                    )
+                    Spacer(Modifier.width(12.dp))
                     Text(
-                        "   Thinking through your logs…",
+                        "Thinking through your logs…",
                         style = MaterialTheme.typography.bodyMedium,
                     )
                 }
@@ -411,7 +424,8 @@ private fun AnalysisResultArea(phase: AnalysisPhase) {
                     Text(
                         "Not a diagnosis. For full symptom information on any condition named, check www.nhs.uk — call 111 for urgent advice or 999 in an emergency.",
                         style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        color = MaterialTheme.colorScheme.error,
+                        fontWeight = FontWeight.Medium,
                         modifier = Modifier.testTag("analysis_live_nhs_note"),
                     )
                 }

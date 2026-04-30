@@ -51,7 +51,8 @@ object AnalysisSanitizer {
     }
 
     /**
-     * Replaces whole-word matches of any token in [names] with `[redacted]`.
+     * Replaces whole-word matches of any token in [names] with the
+     * literal string `[redacted]`.
      * Case-insensitive. Each token is split on whitespace so passing
      * "Jane Mary Doe" redacts "Jane", "Mary", AND "Doe" wherever they
      * appear — not just the full string.

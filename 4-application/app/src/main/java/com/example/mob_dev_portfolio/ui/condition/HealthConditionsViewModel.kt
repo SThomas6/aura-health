@@ -40,10 +40,16 @@ class HealthConditionsViewModel(
     private val _ui = MutableStateFlow(HealthConditionsUiState())
     val ui: StateFlow<HealthConditionsUiState> = _ui.asStateFlow()
 
+    /** Opens the editor in "create" mode — no row id, blank fields. */
     fun openAdd() {
         _ui.value = HealthConditionsUiState(editorOpen = true)
     }
 
+    /**
+     * Opens the editor seeded with [condition]'s current values. The
+     * `editingId` discriminates create vs update at save time so the
+     * dialog doesn't need separate codepaths for each mode.
+     */
     fun openEdit(condition: HealthCondition) {
         _ui.value = HealthConditionsUiState(
             editorOpen = true,
@@ -65,6 +71,13 @@ class HealthConditionsViewModel(
         _ui.update { it.copy(notesDraft = value) }
     }
 
+    /**
+     * Persists the current draft. A blank name is treated as a no-op rather
+     * than an error — the Save button is also disabled in that case, so the
+     * guard exists for completeness only. `editingId == null` triggers an
+     * insert (we pass 0L to let Room auto-assign); a non-null id updates
+     * the existing row in place.
+     */
     fun saveEditor() {
         val current = _ui.value
         if (current.nameDraft.isBlank()) return

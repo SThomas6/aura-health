@@ -44,6 +44,12 @@ The problem it solves: people with environmentally sensitive conditions (migrain
 - Attach diagnoses (e.g. "Chronic migraine") to existing logs; the AI receives these as *already-explained* context rather than new concerns
 - Detail page shows the full audit trail per visit
 
+### Conditions (group symptoms)
+- User-declared standing conditions (e.g. "Migraine", "Mild anxiety", "Hypothyroidism") sit in their own table, separate from doctor-confirmed diagnoses
+- The symptom editor offers a single unified "Condition" picker that merges diagnoses and conditions — the user picks once; the underlying schema is preserved for the AI prompt builder
+- Logs grouped under a condition appear in their own section on the Symptoms list, so a long history of headaches grouped under "Migraine" doesn't drown out other entries
+- Demo flavor seeds three sample conditions on first launch alongside the symptom-log seed
+
 ### PDF health report
 - Multi-page PDF generated on-device using `android.graphics.pdf.PdfDocument` — no third-party PDF library
 - Aggregates symptom logs, severity trends, environmental context, AI analysis history, and doctor-visit summary
@@ -135,10 +141,10 @@ There is no Hilt / Dagger. The app uses a hand-rolled `AppContainer` interface w
 
 ### Database
 
-- Single Room database: `AuraDatabase` (v10, SQLCipher-encrypted)
-- The encryption passphrase is generated on first launch with `SecureRandom` and stored in the Android Keystore (AES-256-GCM)
-- Ten forward migrations — no destructive schema drops
-- Main tables: `symptom_logs`, `symptom_photos`, `analysis_runs`, `analysis_run_logs`, `report_archives`, `medication_reminders`, `medication_dose_events`, `doctor_visits`, `doctor_visit_covered_logs`, `doctor_diagnoses`, `doctor_diagnosis_logs`
+- Single Room database: `AuraDatabase` (v11, SQLCipher-encrypted)
+- The encryption passphrase is generated on first launch with `SecureRandom` and wrapped under an Android Keystore key (AES-256-GCM). The wrapped bytes live in a dedicated DataStore so the SQLCipher key itself never touches plaintext disk.
+- Eleven forward migrations — no destructive schema drops
+- Main tables: `symptom_logs`, `symptom_photos`, `analysis_runs`, `analysis_run_logs`, `report_archives`, `medication_reminders`, `medication_dose_events`, `doctor_visits`, `doctor_visit_covered_logs`, `doctor_diagnoses`, `doctor_diagnosis_logs`, `health_conditions`, `health_condition_logs`
 
 ### Background work
 
@@ -277,15 +283,22 @@ Fast, no emulator needed. Covers:
 | --- | --- |
 | `AnalysisServicePayloadTest` | Gemini request never contains DOB, full name, or raw coordinates |
 | `AnalysisServiceDoctorContextTest` | Cleared logs are excluded; diagnosed logs carry their label; PII stripped from diagnosis annotations |
+| `AnalysisSanitizerTest` | Standalone PII-stripping rules (names, emails) on free-text fields |
 | `AnalysisGuidanceTest` | Structured guidance (recommendations + confidence) parses cleanly |
 | `AnalysisResultStoreTest` | Latest-result DataStore round-trips |
+| `AnalysisViewModelTest` | Loading/Idle/Success transitions, fresh-start contract, offline guard, failure mapping |
+| `HttpGeminiClientTest` | Request shape + response parsing against MockWebServer |
+| `MarkdownRendererTest` | Inline-markdown rendering rules used by the analysis screens |
 | `OpenMeteoEnvironmentalServiceTest` | Weather + AQI response parsing |
 | `WeatherCodeDescriptionTest` | WMO codes map to human-readable labels |
 | `ReverseGeocoderFormatTest` | Place-name formatting across locales |
 | `CoordinateRoundingTest` | Coarse-coordinate privacy (~100 m) |
 | `HistoryViewModelTest`, `HistoryFilterTest` | Filter + sort logic on the symptoms tab |
-| `LogSymptomEnvironmentalFetchTest`, `LogSymptomEditModeTest` | Log editor state machine |
+| `LogSymptomEnvironmentalFetchTest`, `LogSymptomEditModeTest`, `LogSymptomLocationCaptureTest` | Log editor state machine + save-time location/env capture |
+| `LogValidatorTest` | Field validation rules for the symptom editor |
+| `TrendBucketingTest` | Multi-day-symptom expansion in the trends chart |
 | `HomeInsightsTest` | Home dashboard severity aggregation |
+| `UiPreferencesRepositoryTest` | Theme + sort + filter preferences DataStore round-trips |
 | `PlaintextDatabaseMigratorTest` | Legacy plaintext-to-SQLCipher one-shot migration |
 | `FilesystemQuarantineTest` | Corrupted-database recovery path |
 
@@ -332,10 +345,12 @@ Run with:
 │   │   │   │   ├── data/                    # All persistence + I/O
 │   │   │   │   │   ├── AuraDatabase.kt      # Room DB + migrations
 │   │   │   │   │   ├── SymptomLogRepository.kt
+│   │   │   │   │   ├── SymptomLogSeeder.kt   # Demo-flavor first-launch seed
 │   │   │   │   │   ├── ai/                  # Gemini client, analysis service, history store
-│   │   │   │   │   ├── doctor/              # Visits, diagnoses, snapshot builder
-│   │   │   │   │   ├── environment/         # Open-Meteo clients
-│   │   │   │   │   ├── health/              # Health Connect service, snapshots, seeder
+│   │   │   │   │   ├── condition/           # User-declared conditions, log links, seeder
+│   │   │   │   │   ├── doctor/              # Visits, diagnoses, seeder, snapshot builder
+│   │   │   │   │   ├── environment/         # Open-Meteo clients (current + history)
+│   │   │   │   │   ├── health/              # Health Connect service, snapshots, sample seeder
 │   │   │   │   │   ├── location/            # Fused provider + geocoder
 │   │   │   │   │   ├── medication/          # Reminders + dose events
 │   │   │   │   │   ├── photo/               # EXIF strip + encrypted disk store
@@ -349,17 +364,23 @@ Run with:
 │   │   │   │   │
 │   │   │   │   └── ui/                      # Every screen, one subpackage per feature
 │   │   │   │       ├── AuraApp.kt           # Nav graph, root scaffold
+│   │   │   │       ├── DeepLinkEvents.kt    # Notification deep-link bus
 │   │   │   │       ├── analysis/            # Run, history, detail screens
+│   │   │   │       ├── components/          # Cross-feature composables (severity visuals)
+│   │   │   │       ├── condition/           # User-declared health conditions screen
 │   │   │   │       ├── detail/              # Symptom log detail
 │   │   │   │       ├── doctor/              # Doctor visit list, editor, detail
-│   │   │   │       ├── health/              # Health Connect settings
+│   │   │   │       ├── health/              # Health Connect settings + dashboard
 │   │   │   │       ├── history/             # Symptom list + filters
 │   │   │   │       ├── home/                # Dashboard
-│   │   │   │       ├── log/                 # New/edit symptom log
+│   │   │   │       ├── lock/                # Biometric lock screen
+│   │   │   │       ├── log/                 # New/edit symptom log + pickers
 │   │   │   │       ├── medication/          # Reminder list + editor
+│   │   │   │       ├── navigation/          # Type-safe Compose route definitions
 │   │   │   │       ├── onboarding/          # First-run flow
-│   │   │   │       ├── report/              # PDF generate + history
-│   │   │   │       ├── settings/            # Theme, lock, profile
+│   │   │   │       ├── profile/             # Demographic profile editor
+│   │   │   │       ├── report/              # PDF generate + history + preview
+│   │   │   │       ├── settings/            # Theme, lock, profile, medication reminders
 │   │   │   │       ├── theme/               # AuraTheme, colours, typography
 │   │   │   │       └── trends/              # Trend chart with weather overlay
 │   │   │   └── res/                         # Layouts, drawables, themes, string resources
@@ -425,6 +446,8 @@ Expected on a clean install — the app schedules the weekly WorkManager job, cr
 
 ---
 
-## License
+References:
+AI Used to write this README file
+AI used to write comments in this codebase
+AI used to assist with code writing
 
-This project is a college portfolio submission. Not licensed for redistribution.

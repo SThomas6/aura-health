@@ -1,19 +1,18 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
-    <color name="purple_200">#FFBB86FC</color>
-    <color name="purple_500">#FF6200EE</color>
-    <color name="purple_700">#FF3700B3</color>
-    <color name="teal_200">#FF03DAC5</color>
-    <color name="teal_700">#FF018786</color>
-    <color name="black">#FF000000</color>
-    <color name="white">#FFFFFFFF</color>
-
     <!--
         Aura brand palette, used by the Android-12 splash-screen theme.
         The teal matches the hero-card gradient primary on Home; the
         dark variant (for `values-night`) drops luminance rather than
         hue so the splash panel still reads behind the raster icon on
         OLED wallpapers.
+
+        The default `purple_*` / `teal_*` / `black` / `white` entries
+        the Android Studio template ships with were removed — every
+        runtime colour now comes from the Compose `MaterialTheme`
+        colour scheme (see `ui/theme/Theme.kt`), so the values/colors.xml
+        only needs the splash-screen swatches that the platform reads
+        before Compose can run.
     -->
     <color name="aura_brand_teal">#0F6E6E</color>
     <color name="aura_brand_teal_dark">#0A4A4A</color>

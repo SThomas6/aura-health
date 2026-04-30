@@ -43,6 +43,8 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
@@ -171,7 +173,17 @@ fun MedicationEditorScreen(
                             color = MaterialTheme.colorScheme.onSurfaceVariant,
                         )
                     }
-                    Switch(checked = state.enabled, onCheckedChange = viewModel::updateEnabled)
+                    Switch(
+                        checked = state.enabled,
+                        onCheckedChange = viewModel::updateEnabled,
+                        modifier = Modifier.semantics {
+                            contentDescription = if (state.enabled) {
+                                "Reminder is active. Double-tap to pause without deleting."
+                            } else {
+                                "Reminder is paused. Double-tap to re-enable."
+                            }
+                        },
+                    )
                 }
             }
 

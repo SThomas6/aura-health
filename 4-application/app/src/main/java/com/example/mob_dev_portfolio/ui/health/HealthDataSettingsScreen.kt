@@ -37,11 +37,14 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.testTag
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.health.connect.client.PermissionController
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewmodel.compose.viewModel
+import com.example.mob_dev_portfolio.AuraApplication
 import com.example.mob_dev_portfolio.data.health.HealthConnectMetric
 import com.example.mob_dev_portfolio.data.health.HealthConnectService
 import com.example.mob_dev_portfolio.data.health.HealthMetricCategory
@@ -78,6 +81,16 @@ fun HealthDataSettingsScreen(
     val state by viewModel.state.collectAsStateWithLifecycle()
     val context = LocalContext.current
     val snackbarHostState = remember { SnackbarHostState() }
+    // Health Connect's permission contract opens a separate system
+    // activity, so onStop fires on our MainActivity and the biometric
+    // gate would re-prompt on return. Suppress that for every launch
+    // we initiate from this screen — the user has just expressed intent
+    // by tapping our Connect / Grant CTA, so re-authenticating midway
+    // through is friction without a security benefit. Same pattern as
+    // LogSymptomScreen's camera/gallery launchers.
+    val appLockController = remember {
+        (context.applicationContext as AuraApplication).container.appLockController
+    }
 
     // The Health Connect permission contract returns the set of grants
     // currently held (after the user's decision), NOT the delta. We push
@@ -154,6 +167,7 @@ fun HealthDataSettingsScreen(
                             // grants were revoked so the dialog also
                             // appears. The seeder runs in
                             // onPermissionsResult once grants land.
+                            appLockController.suppressNextRelock()
                             permissionLauncher.launch(viewModel.allCatalogPermissions())
                         },
                         onToggleAiInclude = viewModel::setIntegrationEnabled,
@@ -161,6 +175,19 @@ fun HealthDataSettingsScreen(
                     )
                     MetricCategoriesSection(
                         rows = state.metricRows,
+                        onSelectAll = { enable ->
+                            viewModel.setAllMetricsEnabled(enable)
+                            if (enable) {
+                                val missing = state.metricRows
+                                    .filterNot { it.granted }
+                                    .map { it.metric.readPermission }
+                                    .toSet()
+                                if (missing.isNotEmpty()) {
+                                    appLockController.suppressNextRelock()
+                                    permissionLauncher.launch(missing)
+                                }
+                            }
+                        },
                         onMetricToggle = { metric, enabled ->
                             viewModel.setMetricEnabled(metric, enabled)
                             // If the user is flipping a metric on, prompt
@@ -168,10 +195,12 @@ fun HealthDataSettingsScreen(
                             // the toggle doesn't land in a "enabled, not
                             // granted" limbo with no obvious way to fix it.
                             if (enabled && !state.metricRows.first { it.metric == metric }.granted) {
+                                appLockController.suppressNextRelock()
                                 permissionLauncher.launch(setOf(metric.readPermission))
                             }
                         },
                         onGrantRow = { metric ->
+                            appLockController.suppressNextRelock()
                             permissionLauncher.launch(setOf(metric.readPermission))
                         },
                     )
@@ -332,7 +361,15 @@ private fun MasterToggleCard(
                     checked = integrationEnabled,
                     onCheckedChange = onToggleAiInclude,
                     enabled = connectionActive,
-                    modifier = Modifier.testTag("health_master_switch"),
+                    modifier = Modifier
+                        .testTag("health_master_switch")
+                        .semantics {
+                            contentDescription = if (integrationEnabled) {
+                                "Health Connect data is being included in AI analysis. Double-tap to stop."
+                            } else {
+                                "Health Connect data is not being included in AI analysis. Double-tap to include it."
+                            }
+                        },
                 )
             }
         }
@@ -342,9 +379,34 @@ private fun MasterToggleCard(
 @Composable
 private fun MetricCategoriesSection(
     rows: List<HealthMetricRowState>,
+    onSelectAll: (Boolean) -> Unit,
     onMetricToggle: (HealthConnectMetric, Boolean) -> Unit,
     onGrantRow: (HealthConnectMetric) -> Unit,
 ) {
+    // "All on" is the trigger for switching the button copy to
+    // "Deselect all". We inspect the rows themselves so the label tracks
+    // reality even when the user has flipped individual switches.
+    val allEnabled = rows.isNotEmpty() && rows.all { it.enabled }
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(horizontal = 4.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Text(
+            text = "Metrics",
+            style = MaterialTheme.typography.labelLarge,
+            fontWeight = FontWeight.SemiBold,
+            modifier = Modifier.weight(1f),
+        )
+        TextButton(
+            onClick = { onSelectAll(!allEnabled) },
+            modifier = Modifier.testTag("health_select_all"),
+        ) {
+            Text(if (allEnabled) "Deselect all" else "Select all")
+        }
+    }
+
     val grouped = rows.groupBy { it.metric.category }
     HealthMetricCategory.entries.forEach { category ->
         val subset = grouped[category].orEmpty()
@@ -386,11 +448,13 @@ private fun MetricRow(
     ) {
         Column(Modifier.weight(1f)) {
             Text(row.metric.displayLabel, style = MaterialTheme.typography.bodyLarge)
+            // The first two arms cover every `row.enabled == true` case,
+            // so the third arm is reached only when `enabled == false` —
+            // we can use `else` instead of the redundant `!row.enabled`.
             val subtitle = when {
                 row.enabled && row.granted -> "Enabled and permission granted."
                 row.enabled && !row.granted -> "Enabled — permission needed."
-                !row.enabled -> "Toggle on to include in the AI analysis."
-                else -> ""
+                else -> "Toggle on to include in the AI analysis."
             }
             Text(
                 text = subtitle,
@@ -404,7 +468,15 @@ private fun MetricRow(
         Switch(
             checked = row.enabled,
             onCheckedChange = onToggle,
-            modifier = Modifier.testTag("health_toggle_${row.metric.storageKey}"),
+            modifier = Modifier
+                .testTag("health_toggle_${row.metric.storageKey}")
+                .semantics {
+                    contentDescription = if (row.enabled) {
+                        "${row.metric.displayLabel} is enabled. Double-tap to stop including it in analysis."
+                    } else {
+                        "${row.metric.displayLabel} is disabled. Double-tap to include it in analysis."
+                    }
+                },
         )
     }
 }

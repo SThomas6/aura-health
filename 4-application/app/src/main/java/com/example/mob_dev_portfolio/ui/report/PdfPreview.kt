@@ -5,6 +5,7 @@ import android.graphics.Bitmap
 import android.graphics.Color
 import android.graphics.pdf.PdfRenderer
 import android.os.ParcelFileDescriptor
+import androidx.core.graphics.createBitmap
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
@@ -204,13 +205,13 @@ private class PdfRenderSession(
             openedFd = ParcelFileDescriptor.open(file, ParcelFileDescriptor.MODE_READ_ONLY)
             openedRenderer = PdfRenderer(openedFd)
         } catch (t: Throwable) {
-            // Roll back any partially-acquired resources so we don't
-            // leak a file descriptor when the PdfRenderer constructor
-            // fails after the fd has been opened.
-            runCatching { openedRenderer?.close() }
+            // Roll back the file descriptor so we don't leak it when
+            // the PdfRenderer constructor fails after the fd has been
+            // opened. `openedRenderer` is always null here (the line
+            // that would have assigned it is the line that threw), so
+            // there's nothing to close on the renderer side.
             runCatching { openedFd?.close() }
             openedFd = null
-            openedRenderer = null
         }
         fd = openedFd
         renderer = openedRenderer
@@ -252,11 +253,7 @@ private class PdfRenderSession(
             val pageHeight = page.height.coerceAtLeast(1)
             val scale = targetWidthPx.toFloat() / pageWidth.toFloat()
             val bitmapHeight = (pageHeight * scale).toInt().coerceAtLeast(1)
-            val bitmap = Bitmap.createBitmap(
-                targetWidthPx,
-                bitmapHeight,
-                Bitmap.Config.ARGB_8888,
-            )
+            val bitmap = createBitmap(targetWidthPx, bitmapHeight)
             bitmap.eraseColor(Color.WHITE)
             page.render(
                 bitmap,

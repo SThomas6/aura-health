@@ -1,13 +1,22 @@
 package com.example.mob_dev_portfolio.ui.navigation
 
+import androidx.annotation.StringRes
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ListAlt
 import androidx.compose.material.icons.filled.AutoAwesome
 import androidx.compose.material.icons.filled.Home
 import androidx.compose.material.icons.filled.MedicalServices
 import androidx.compose.ui.graphics.vector.ImageVector
+import com.example.mob_dev_portfolio.R
 import kotlinx.serialization.Serializable
 
+/**
+ * Closed set of top-level destinations that appear in the bottom-bar /
+ * nav-rail. Modelled as a sealed interface so the navigation layer's
+ * `when` blocks are exhaustive — adding a new top-level tab forces the
+ * `selected` matcher in [com.example.mob_dev_portfolio.ui.AuraApp] to be
+ * updated rather than silently falling through.
+ */
 sealed interface TopLevelRoute {
     @Serializable
     data object Home : TopLevelRoute
@@ -27,9 +36,18 @@ sealed interface TopLevelRoute {
     data object Doctor : TopLevelRoute
 }
 
+/**
+ * Route to the read-only symptom-log detail view. Carries the Room rowId
+ * so navigation deep-links and notification taps share the same wiring.
+ */
 @Serializable
 data class DetailRoute(val id: Long)
 
+/**
+ * Route to the symptom-log edit form. A separate route from
+ * [LogSymptomRoute] (the create form) so the back-stack lands the user on
+ * the detail view rather than the list when they finish editing.
+ */
 @Serializable
 data class EditLogRoute(val id: Long)
 
@@ -172,16 +190,28 @@ data class DoctorVisitDetailRoute(val id: Long)
 @Serializable
 data class DoctorVisitEditorRoute(val id: Long? = null)
 
+/**
+ * One bottom-bar / nav-rail destination. The label is held as a
+ * [StringRes] (not a literal) so the user-visible text is centralised
+ * in `strings.xml` — easier to translate, easier for the marker to
+ * audit i18n compliance. The composable resolves the resource via
+ * `stringResource(dest.labelRes)` inside the navigation suite.
+ */
 data class TopLevelDestination(
     val route: TopLevelRoute,
-    val label: String,
+    @StringRes val labelRes: Int,
     val icon: ImageVector,
     val routeQualifiedName: String,
+    /**
+     * Stable, locale-independent identifier — used for `testTag` so
+     * Compose UI tests don't break when the label translates.
+     */
+    val testTagId: String,
 )
 
 val TopLevelDestinations: List<TopLevelDestination> = listOf(
-    TopLevelDestination(TopLevelRoute.Home, "Home", Icons.Filled.Home, TopLevelRoute.Home::class.qualifiedName.orEmpty()),
-    TopLevelDestination(TopLevelRoute.History, "Symptoms", Icons.AutoMirrored.Filled.ListAlt, TopLevelRoute.History::class.qualifiedName.orEmpty()),
-    TopLevelDestination(TopLevelRoute.Doctor, "Doctor", Icons.Filled.MedicalServices, TopLevelRoute.Doctor::class.qualifiedName.orEmpty()),
-    TopLevelDestination(TopLevelRoute.Analysis, "Analyse", Icons.Filled.AutoAwesome, TopLevelRoute.Analysis::class.qualifiedName.orEmpty()),
+    TopLevelDestination(TopLevelRoute.Home, R.string.nav_home, Icons.Filled.Home, TopLevelRoute.Home::class.qualifiedName.orEmpty(), "home"),
+    TopLevelDestination(TopLevelRoute.History, R.string.nav_symptoms, Icons.AutoMirrored.Filled.ListAlt, TopLevelRoute.History::class.qualifiedName.orEmpty(), "symptoms"),
+    TopLevelDestination(TopLevelRoute.Doctor, R.string.nav_doctor, Icons.Filled.MedicalServices, TopLevelRoute.Doctor::class.qualifiedName.orEmpty(), "doctor"),
+    TopLevelDestination(TopLevelRoute.Analysis, R.string.nav_analyse, Icons.Filled.AutoAwesome, TopLevelRoute.Analysis::class.qualifiedName.orEmpty(), "analyse"),
 )

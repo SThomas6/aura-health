@@ -79,6 +79,13 @@ class AnalysisDetailViewModel(
     }
 
     companion object {
+        /**
+         * Factory that closes over the [runId] route argument so the VM
+         * can be instantiated by `viewModel(factory = ...)`. The
+         * AuraApplication is reached via [CreationExtras] (rather than
+         * a constructor injection framework) to keep the dependency
+         * container in plain Kotlin without pulling in Hilt/Dagger.
+         */
         fun factory(runId: Long): ViewModelProvider.Factory = object : ViewModelProvider.Factory {
             @Suppress("UNCHECKED_CAST")
             override fun <T : ViewModel> create(modelClass: Class<T>, extras: CreationExtras): T {

@@ -150,9 +150,3 @@ val AuraTypography = Typography(
         letterSpacing = 1.sp,
     ),
 )
-
-/** Mono text style for numeric readouts (severity value, stat pills, trend labels). */
-val MonoNumericStyle: TextStyle = TextStyle(
-    fontFamily = AuraMonoFamily,
-    fontWeight = FontWeight.SemiBold,
-)

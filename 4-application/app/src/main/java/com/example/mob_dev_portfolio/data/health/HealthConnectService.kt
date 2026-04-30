@@ -146,10 +146,6 @@ open class HealthConnectService(
         return enabled.filter { it.readPermission in granted }.toSet()
     }
 
-    /** The full permission set to request when the user flips a toggle on. */
-    fun requiredPermissions(metrics: Set<HealthConnectMetric>): Set<String> =
-        metrics.map { it.readPermission }.toSet()
-
     /**
      * Materialises a [HealthSnapshot] for the given symptom-log window.
      *

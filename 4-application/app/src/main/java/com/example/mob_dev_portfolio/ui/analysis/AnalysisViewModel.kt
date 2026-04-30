@@ -17,7 +17,9 @@ import com.example.mob_dev_portfolio.work.AnalysisWorker
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.drop
 import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 
 /**
@@ -60,6 +62,22 @@ data class AnalysisUiState(
     val transientError: String? = null,
 )
 
+/**
+ * ViewModel for the AI analysis "run" form.
+ *
+ * Coordinates three async sources behind a single [AnalysisUiState]:
+ *   1. [UserProfileRepository] — read once at init to seed the form, then
+ *      written through with fire-and-forget setters on every keystroke.
+ *      We deliberately don't subscribe to the repo flow afterwards (see
+ *      [AnalysisUiState.fullName]) to keep the field cursor stable.
+ *   2. [AnalysisResultStore] — the latest stored Gemini result. Drives the
+ *      Success phase so a user returning from a notification tap (or
+ *      simply re-opening the app) sees the most recent summary without
+ *      having to re-run.
+ *   3. [AnalysisScheduler] (`WorkManager`) — emits per-attempt `WorkInfo`
+ *      so we can render Loading while a background worker is in flight,
+ *      and surface failure messages without polling.
+ */
 class AnalysisViewModel(
     private val profileRepository: UserProfileRepository,
     private val resultStore: AnalysisResultStore,
@@ -85,12 +103,27 @@ class AnalysisViewModel(
             }
         }
 
-        // Observe the result store: whenever a worker completes a successful
-        // analysis, paint it into the Success phase so a user returning from
-        // the notification tap (or simply re-opening the app) sees the
-        // summary without having to re-run.
+        // Observe the result store for analyses that LAND DURING THIS
+        // VM session — i.e. the worker we just kicked off (or one
+        // already in flight when the screen opened) finishing and
+        // writing its summary.
+        //
+        // `drop(1)` skips the initial emission, which is the cached
+        // result from prior runs. Without that drop, opening the
+        // screen would paint the most recent past analysis straight
+        // into the Success phase — making "Run AI analysis" feel like
+        // a results page rather than a fresh-start surface. Users who
+        // want to revisit prior results go to the analysis history
+        // screen; this surface is just for kicking off a new run.
+        //
+        // When the worker completes mid-session, the second emission
+        // (the new result) flows through as usual: if we're already
+        // Loading, the WorkInfo SUCCEEDED branch below paints Success
+        // from the same store; if we're somehow Idle (race recovery,
+        // weekly background worker landing while the user idles on the
+        // screen), the else branch here paints it directly.
         viewModelScope.launch {
-            resultStore.latest.collect { stored ->
+            resultStore.latest.drop(1).collect { stored ->
                 if (stored != null) {
                     _state.update { current ->
                         // Don't stomp Loading: if a worker is still running,
@@ -147,10 +180,16 @@ class AnalysisViewModel(
         }
     }
 
+    /** Updates the free-text "additional context" field — purely in-memory. */
     fun onUserContextChange(value: String) {
         _state.update { it.copy(userContext = value) }
     }
 
+    /**
+     * Updates the in-memory full-name field and writes through to the
+     * persisted profile. The synchronous state update keeps the cursor
+     * stable; the DataStore write is fire-and-forget on viewModelScope.
+     */
     fun onFullNameChange(value: String) {
         // Synchronous UI update first — the field re-renders with the user's
         // actual typed value without waiting for DataStore.
@@ -158,11 +197,16 @@ class AnalysisViewModel(
         viewModelScope.launch { profileRepository.setFullName(value) }
     }
 
+    /**
+     * Stores the picked DOB as epoch millis. Same write-through pattern as
+     * the name field — sync state update, async persistence write.
+     */
     fun onDateOfBirthChange(epochMillis: Long?) {
         _state.update { it.copy(dobEpochMillis = epochMillis) }
         viewModelScope.launch { profileRepository.setDateOfBirth(epochMillis) }
     }
 
+    /** Clears the snackbar one-shot once the host has displayed the message. */
     fun onTransientErrorShown() {
         _state.update { it.copy(transientError = null) }
     }
@@ -215,12 +259,6 @@ class AnalysisViewModel(
             guidance = guidance,
             completedAtEpochMillis = completedAtEpochMillis,
         )
-
-    private inline fun MutableStateFlow<AnalysisUiState>.update(
-        transform: (AnalysisUiState) -> AnalysisUiState,
-    ) {
-        value = transform(value)
-    }
 
     companion object {
         val Factory: ViewModelProvider.Factory = object : ViewModelProvider.Factory {

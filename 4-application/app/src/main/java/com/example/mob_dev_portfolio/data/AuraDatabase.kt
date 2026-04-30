@@ -25,6 +25,23 @@ import com.example.mob_dev_portfolio.data.report.ReportArchiveDao
 import com.example.mob_dev_portfolio.data.report.ReportArchiveEntity
 import net.zetetic.database.sqlcipher.SupportOpenHelperFactory
 
+/**
+ * Single-source-of-truth Room database, opened on top of SQLCipher via
+ * the `SupportOpenHelperFactory` so every byte at rest is encrypted with
+ * the per-install passphrase resolved by [com.example.mob_dev_portfolio.data.security.DatabasePassphraseProvider].
+ *
+ * Schema lives across many entities (symptom logs, AI runs, reports,
+ * medication, photos, doctor visits, conditions). Each feature owns its
+ * tables in its own package; this class wires the DAOs up. The
+ * `version`/migration list grows monotonically — old installs walk the
+ * full migration chain on first launch after upgrade, never skipping
+ * steps. `exportSchema = false` because we don't ship a JSON schema
+ * artefact for the assessment build.
+ *
+ * The companion's [get] enforces a single instance per process (the
+ * standard double-checked-locking pattern) so all DAOs share the same
+ * connection pool.
+ */
 @Database(
     entities = [
         SymptomLogEntity::class,
@@ -401,6 +418,14 @@ abstract class AuraDatabase : RoomDatabase() {
             }
         }
 
+        /**
+         * Lazily constructs the singleton database instance. Uses
+         * double-checked locking so the synchronisation cost is paid
+         * once on first open and never again. The passphrase is
+         * defensively `copyOf`-ed because SQLCipher's open helper
+         * zeroes the array it receives — re-using the original after
+         * `build()` would leak a wiped buffer to later callers.
+         */
         fun get(context: Context, passphrase: ByteArray): AuraDatabase =
             instance ?: synchronized(this) {
                 instance ?: Room.databaseBuilder(

@@ -2,7 +2,6 @@ package com.example.mob_dev_portfolio.data.medication
 
 import java.time.DayOfWeek
 import java.time.Instant
-import java.time.LocalDate
 import java.time.LocalTime
 import java.time.ZoneId
 
@@ -93,7 +92,4 @@ object NextFireCalculator {
         DayOfWeek.SATURDAY -> "Sat"
         DayOfWeek.SUNDAY -> "Sun"
     }
-
-    fun LocalDate.toStartOfDayInstant(zone: ZoneId): Instant =
-        atStartOfDay(zone).toInstant()
 }

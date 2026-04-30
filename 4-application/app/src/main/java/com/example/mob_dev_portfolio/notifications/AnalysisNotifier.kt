@@ -76,7 +76,7 @@ open class AnalysisNotifier(
             .setPriority(NotificationCompat.PRIORITY_DEFAULT)
             .setCategory(NotificationCompat.CATEGORY_STATUS)
             .build()
-        post(NOTIFICATION_ID_RESULT, notification)
+        post(notification)
     }
 
     /**
@@ -107,7 +107,7 @@ open class AnalysisNotifier(
             .setPriority(NotificationCompat.PRIORITY_DEFAULT)
             .setCategory(NotificationCompat.CATEGORY_ERROR)
             .build()
-        post(NOTIFICATION_ID_RESULT, notification)
+        post(notification)
     }
 
     /**
@@ -142,7 +142,7 @@ open class AnalysisNotifier(
      * would be worse: the user has already told the OS they don't want
      * these.
      */
-    private fun post(id: Int, notification: Notification) {
+    private fun post(notification: Notification) {
         ensureChannel()
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
             val granted = ContextCompat.checkSelfPermission(
@@ -151,7 +151,7 @@ open class AnalysisNotifier(
             ) == PackageManager.PERMISSION_GRANTED
             if (!granted) return
         }
-        NotificationManagerCompat.from(context).notify(id, notification)
+        NotificationManagerCompat.from(context).notify(NOTIFICATION_ID_RESULT, notification)
     }
 
     sealed interface FailureReason {
@@ -189,8 +189,8 @@ open class AnalysisNotifier(
             "com.example.mob_dev_portfolio.EXTRA_ANALYSIS_RUN_ID"
 
         /**
-         * Factory exposed so [AnalysisNotifierTest] can assert the intent
-         * shape without a live Context-backed PendingIntent.
+         * Factory exposed so unit tests can assert the intent shape
+         * without a live Context-backed PendingIntent.
          */
         fun buildDeepLinkIntent(context: Context, runId: Long? = null): Intent =
             Intent(context, MainActivity::class.java).apply {

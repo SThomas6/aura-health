@@ -26,14 +26,25 @@ import kotlinx.coroutines.flow.Flow
  *      KEEP so double-taps ignore rather than replace) touches one file.
  */
 interface AnalysisScheduler {
+    /**
+     * Enqueue a one-shot analysis run, replacing any in-flight run with
+     * a fresh one (so a re-tap with edited [userContext] supersedes the
+     * stale request). The worker requires connectivity — if the device
+     * is offline at enqueue, WorkManager defers until network returns.
+     */
     fun enqueue(userContext: String)
+
+    /**
+     * Hot stream of WorkInfos for the unique one-shot analysis chain.
+     * The ViewModel observes this to drive the on-screen progress / done
+     * state without polling.
+     */
     fun currentWorkInfos(): Flow<List<WorkInfo>>
-    fun cancel()
 
     /**
      * Ensure a weekly background analysis is scheduled.
      *
-     * Idempotent: call this from [AuraApplication.onCreate] on every cold
+     * Idempotent: call this from `AuraApplication.onCreate` on every cold
      * start. [ExistingPeriodicWorkPolicy.KEEP] means the first call wins —
      * we never restart the countdown, so the weekly cadence drifts at most
      * one period even if the user force-stops and relaunches the app.
@@ -43,11 +54,15 @@ interface AnalysisScheduler {
      * ping when something actually needs attention.
      */
     fun scheduleWeekly()
-
-    /** Cancel the recurring weekly run (e.g. if the user opts out). */
-    fun cancelWeekly()
 }
 
+/**
+ * Production [AnalysisScheduler] backed by the real [WorkManager]
+ * singleton. The class is deliberately stateless beyond the injected
+ * `workManager` — every call is a thin wrapper around a WorkManager
+ * primitive so the only thing tests need to fake is `WorkManager`
+ * itself, not this class.
+ */
 class WorkManagerAnalysisScheduler(
     private val workManager: WorkManager,
 ) : AnalysisScheduler {
@@ -78,10 +93,6 @@ class WorkManagerAnalysisScheduler(
     override fun currentWorkInfos(): Flow<List<WorkInfo>> =
         workManager.getWorkInfosForUniqueWorkFlow(AnalysisWorker.UNIQUE_WORK_NAME)
 
-    override fun cancel() {
-        workManager.cancelUniqueWork(AnalysisWorker.UNIQUE_WORK_NAME)
-    }
-
     override fun scheduleWeekly() {
         val request = PeriodicWorkRequestBuilder<AnalysisWorker>(7, TimeUnit.DAYS)
             .setInputData(workDataOf(AnalysisWorker.KEY_SCHEDULED to true))
@@ -105,7 +116,4 @@ class WorkManagerAnalysisScheduler(
         )
     }
 
-    override fun cancelWeekly() {
-        workManager.cancelUniqueWork(AnalysisWorker.UNIQUE_WEEKLY_NAME)
-    }
 }

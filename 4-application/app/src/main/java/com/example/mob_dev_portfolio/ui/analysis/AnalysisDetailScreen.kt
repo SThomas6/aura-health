@@ -402,8 +402,8 @@ private fun SummaryCard(run: AnalysisRun) {
 private fun NhsReferenceCard() {
     Card(
         colors = CardDefaults.cardColors(
-            containerColor = MaterialTheme.colorScheme.tertiaryContainer,
-            contentColor = MaterialTheme.colorScheme.onTertiaryContainer,
+            containerColor = MaterialTheme.colorScheme.errorContainer,
+            contentColor = MaterialTheme.colorScheme.onErrorContainer,
         ),
         shape = RoundedCornerShape(16.dp),
         modifier = Modifier
@@ -415,13 +415,16 @@ private fun NhsReferenceCard() {
             verticalArrangement = Arrangement.spacedBy(6.dp),
         ) {
             Text(
-                "Check the NHS for full symptom information",
+                "Not a diagnosis — check the NHS for full symptom information",
                 style = MaterialTheme.typography.titleSmall,
                 fontWeight = FontWeight.SemiBold,
+                color = MaterialTheme.colorScheme.error,
             )
             Text(
                 "This analysis is not a diagnosis. For any condition named above, or if anything you're feeling worries you, look up the full symptom list at www.nhs.uk. Call 111 for urgent-but-not-emergency advice, or 999 if symptoms are severe or life-threatening.",
                 style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.error,
+                fontWeight = FontWeight.Medium,
             )
         }
     }

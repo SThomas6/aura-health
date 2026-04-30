@@ -32,6 +32,7 @@ import androidx.compose.material.icons.filled.FilterList
 import androidx.compose.material.icons.filled.Search
 import androidx.compose.material3.Badge
 import androidx.compose.material3.BadgedBox
+import androidx.compose.material3.Button
 import androidx.compose.material3.DatePicker
 import androidx.compose.material3.DatePickerDialog
 import androidx.compose.material3.ExperimentalMaterial3Api
@@ -522,6 +523,24 @@ private fun FilterSheet(
                     }
                 }
             }
+
+            // Each filter control above writes through to the ViewModel
+            // immediately, so the underlying log list is already
+            // up-to-date by the time the user reaches this button —
+            // they just can't see it until the sheet dismisses. The
+            // Apply button is therefore a pure dismiss, not a "commit
+            // the changes" action; the label "Apply" matches the
+            // user's mental model of "show me the results now". A
+            // dedicated Cancel button would be misleading here because
+            // there's nothing to cancel — drag-down or tap-outside
+            // also dismiss without losing in-progress filter edits.
+            Button(
+                onClick = onDismiss,
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .heightIn(min = 56.dp)
+                    .testTag("btn_apply_filters"),
+            ) { Text("Apply") }
 
             Spacer(Modifier.height(4.dp))
         }

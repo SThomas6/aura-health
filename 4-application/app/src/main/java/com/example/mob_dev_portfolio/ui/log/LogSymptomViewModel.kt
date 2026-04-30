@@ -1,6 +1,7 @@
 package com.example.mob_dev_portfolio.ui.log
 
 import android.net.Uri
+import android.util.Log
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.ViewModelProvider
 import androidx.lifecycle.viewModelScope
@@ -8,7 +9,6 @@ import androidx.lifecycle.viewmodel.CreationExtras
 import com.example.mob_dev_portfolio.AuraApplication
 import com.example.mob_dev_portfolio.data.SymptomLog
 import com.example.mob_dev_portfolio.data.SymptomLogRepository
-import com.example.mob_dev_portfolio.data.doctor.DoctorDiagnosis
 import com.example.mob_dev_portfolio.data.doctor.DoctorVisitRepository
 import com.example.mob_dev_portfolio.data.doctor.LogDoctorAnnotation
 import com.example.mob_dev_portfolio.data.environment.EnvironmentalFetchResult
@@ -25,6 +25,7 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.flowOf
 import kotlinx.coroutines.flow.stateIn
@@ -32,6 +33,15 @@ import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withTimeout
 
+/**
+ * State machine for the edit-mode load lifecycle.
+ *
+ * The composable uses this to decide which empty-state to render
+ * (`Loading` spinner, `NotFound` "deleted" panel, `Failed` retryable
+ * banner) without juggling a flat set of nullable booleans. `NotEditing`
+ * is the initial state when the screen is opened in create mode and the
+ * loader never runs.
+ */
 sealed interface EditLoadState {
     data object NotEditing : EditLoadState
     data object Loading : EditLoadState
@@ -40,6 +50,20 @@ sealed interface EditLoadState {
     data class Failed(val message: String) : EditLoadState
 }
 
+/**
+ * Single-source-of-truth UI state for the symptom editor.
+ *
+ * Bundling everything into one [data class] (rather than a soup of
+ * separate StateFlows) keeps the StateFlow contract tight: every render
+ * sees a coherent snapshot of draft + errors + permission flags + photo
+ * lists, with no chance of one half of the screen showing pre-update
+ * data while the other half is post-update.
+ *
+ * One-shot signals like [savedConfirmation], [transientError] and
+ * [shouldRequestLocationPermission] are nulled out by the screen after
+ * being consumed (via the `on*Shown`/`on*Consumed` handlers) so they
+ * can't fire twice across recompositions.
+ */
 data class LogSymptomUiState(
     val draft: LogDraft = LogDraft(),
     val errors: Map<LogField, String> = emptyMap(),
@@ -80,23 +104,42 @@ data class LogSymptomUiState(
      */
     val showCameraDeniedRationale: Boolean = false,
     /**
-     * Id of the diagnosis this log should be pinned to, or null to leave
-     * it unlinked. Persisted post-save via
-     * [DoctorVisitRepository.attachLogToDiagnosis]. On edit it's
-     * hydrated from the existing link so the picker reflects reality.
+     * Composite id of the [LogGrouping] this log is grouped under, or
+     * null when unlinked. The picker treats user-declared conditions
+     * and doctor-confirmed diagnoses as a single mutually-exclusive
+     * dropdown — the underlying schema still keeps them in separate
+     * tables, but the editor surfaces them as one field.
+     *
+     * Encoding: `"diag:<id>"` for a diagnosis, `"cond:<id>"` for a
+     * condition, parsed by the helpers on [LogGrouping].
+     *
+     * On edit it's hydrated from whichever link exists, with the
+     * diagnosis taking precedence if (defensively) both are present.
      */
-    val selectedDiagnosisId: Long? = null,
-    /**
-     * Id of the user-declared health condition this log is grouped
-     * under, or null. Persisted post-save via
-     * [com.example.mob_dev_portfolio.data.condition.HealthConditionRepository.setLogCondition].
-     * Distinct from [selectedDiagnosisId]: that one represents a
-     * doctor-confirmed diagnosis tied to a specific visit, this one
-     * represents a standing condition the user added themselves.
-     */
-    val selectedConditionId: Long? = null,
+    val selectedGroupingId: String? = null,
 )
 
+/**
+ * ViewModel powering the Symptom Editor (`LogSymptomScreen`) for both
+ * "create new" and "edit existing" flows.
+ *
+ * Two factories ([Factory] and [editFactory]) cover the two entry
+ * points; `editingId == 0L` distinguishes create from edit so the same
+ * class can host both paths without duplicating the form state.
+ *
+ * Most external dependencies are nullable so the existing test doubles
+ * compile without wiring every subsystem — the production [Factory]
+ * supplies the full set, but unit tests can omit, e.g., the doctor-visit
+ * repository and assert the form path in isolation.
+ *
+ * The [save] orchestration is the heart of this class: it captures
+ * location at save time (never earlier — see save-time-only contract in
+ * NFR-PR-04), kicks off a 5-second environmental fetch with an
+ * authoritative timeout, persists the row, then flushes pending photos
+ * and reconciles diagnosis/condition links. Each step degrades to a
+ * non-blocking warning if it fails so the user's primary intent (saving
+ * the log) is never blocked by an environmental hiccup.
+ */
 class LogSymptomViewModel(
     private val repository: SymptomLogRepository,
     private val locationProvider: LocationProvider? = null,
@@ -132,30 +175,29 @@ class LogSymptomViewModel(
     val state: StateFlow<LogSymptomUiState> = _state.asStateFlow()
 
     /**
-     * Every diagnosis across every visit. Backs the "Link to diagnosis"
-     * dropdown on the log editor — only rendered when non-empty, so a
-     * user who has never logged a doctor visit sees no extra field.
+     * Merged "Group under condition" picker source — combines user-
+     * declared conditions and doctor-confirmed diagnoses into a single
+     * list the editor renders as one dropdown.
+     *
+     * The two underlying flows live in different repositories and the
+     * domain models are deliberately distinct (one carries visit
+     * provenance, the other doesn't), but from the user's perspective
+     * the editor question is the same: "which standing health thing
+     * does this log belong to?". Combining them client-side keeps the
+     * schema honest while removing the duplicate UI.
      */
-    val diagnoses: StateFlow<List<DoctorDiagnosis>> =
-        (doctorVisitRepository?.observeAllDiagnoses() ?: flowOf(emptyList()))
-            .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000L), emptyList())
-
-    /**
-     * User-declared health conditions, available for the "group under
-     * a condition" dropdown on the editor. Empty list when the repo
-     * isn't wired or the user has declared none — the picker renders
-     * itself out in that case so the form stays uncluttered.
-     */
-    val healthConditions: StateFlow<List<com.example.mob_dev_portfolio.data.condition.HealthCondition>> =
-        (healthConditionRepository?.observeAll() ?: flowOf(emptyList()))
-            .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000L), emptyList())
+    val groupings: StateFlow<List<LogGrouping>> = combine(
+        healthConditionRepository?.observeAll() ?: flowOf(emptyList()),
+        doctorVisitRepository?.observeAllDiagnoses() ?: flowOf(emptyList()),
+    ) { conditions, diagnoses ->
+        LogGrouping.build(conditions = conditions, diagnoses = diagnoses)
+    }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000L), emptyList())
 
     init {
         if (editingId != 0L) {
             loadForEditing()
             observeAttachedPhotos(editingId)
-            loadExistingDiagnosisLink(editingId)
-            loadExistingConditionLink(editingId)
+            loadExistingGrouping(editingId)
         }
     }
 
@@ -221,46 +263,47 @@ class LogSymptomViewModel(
     }
 
     /**
-     * Read the current (if any) diagnosis link for the log being edited so
-     * the picker opens in sync with the DB. A cleared log counts as "not
-     * linked" for the purposes of this picker — clearing is an explicit
-     * signal that the log is done, so we don't surface a diagnosis tag
-     * that would invite the user to reinterpret it.
+     * Read whichever grouping link the log being edited currently has
+     * — diagnosis or condition — and seed [LogSymptomUiState.selectedGroupingId]
+     * so the merged picker opens in sync with the DB.
+     *
+     * If (defensively) both links exist (the schema permits it; the
+     * editor enforces mutual exclusivity from this commit forward, but
+     * pre-merge data may have both set), the diagnosis wins because
+     * doctor-confirmed provenance is the more specific signal. The
+     * next save will normalise the row by clearing the loser.
+     *
+     * A cleared log counts as "not linked" for picker purposes —
+     * clearing is an explicit signal the log is done, so we don't
+     * resurface a tag that would invite reinterpretation.
      */
-    private fun loadExistingDiagnosisLink(id: Long) {
-        val repo = doctorVisitRepository ?: return
+    private fun loadExistingGrouping(id: Long) {
         viewModelScope.launch {
-            val linked = runCatching { repo.observeLogAnnotation(id).first() }.getOrNull()
-            val existingDiagnosisId = (linked as? LogDoctorAnnotation.LinkedToDiagnosis)
-                ?.diagnosis?.id
-            _state.update { it.copy(selectedDiagnosisId = existingDiagnosisId) }
+            val diagnosisId = doctorVisitRepository?.let { repo ->
+                val linked = runCatching { repo.observeLogAnnotation(id).first() }.getOrNull()
+                (linked as? LogDoctorAnnotation.LinkedToDiagnosis)?.diagnosis?.id
+            }
+            val groupingId = if (diagnosisId != null) {
+                "diag:$diagnosisId"
+            } else {
+                val conditionId = healthConditionRepository?.let { repo ->
+                    runCatching { repo.observeConditionForLog(id).first() }.getOrNull()?.id
+                }
+                conditionId?.let { "cond:$it" }
+            }
+            _state.update { it.copy(selectedGroupingId = groupingId) }
         }
     }
 
     /**
-     * Picker change handler. Passing null unlinks the log on save.
-     * Toggling the same id off (passing null when it was set) is
-     * treated as "clear my link" — the save flow will detach it.
+     * Picker change handler for the merged grouping dropdown. Passing
+     * null unlinks the log on save (clears any prior diagnosis AND any
+     * prior condition link). Selecting a value swaps to the new link
+     * and clears the other-side link — guaranteeing a log lives under
+     * at most one grouping at a time.
      */
-    fun onSelectDiagnosis(diagnosisId: Long?) {
-        _state.update { it.copy(selectedDiagnosisId = diagnosisId) }
-    }
-
-    /** UI handler for the user-declared condition picker. */
-    fun onSelectCondition(conditionId: Long?) {
-        _state.update { it.copy(selectedConditionId = conditionId) }
-    }
-
-    /**
-     * Read the current condition link for the log being edited so the
-     * picker opens reflecting reality.
-     */
-    private fun loadExistingConditionLink(id: Long) {
-        val repo = healthConditionRepository ?: return
-        viewModelScope.launch {
-            val linked = runCatching { repo.observeConditionForLog(id).first() }.getOrNull()
-            _state.update { it.copy(selectedConditionId = linked?.id) }
-        }
+    fun onSelectGrouping(groupingId: String?) {
+        _state.update { it.copy(selectedGroupingId = groupingId) }
     }
 
     fun onSymptomNameChange(value: String) = updateDraft(LogField.SymptomName) { copy(symptomName = value) }
@@ -415,7 +458,9 @@ class LogSymptomViewModel(
             // If the user didn't opt in, or permission wasn't granted, or the
             // provider returns anything other than coordinates, we persist
             // null — saving always succeeds even when location fails.
-            val capture = maybeCaptureLocation(
+            val capture = captureLocation(
+                provider = locationProvider,
+                reverseGeocoder = reverseGeocoder,
                 attach = draft.attachLocation,
                 permissionGranted = current.locationPermissionGranted,
                 fallbackLat = draft.locationLatitude,
@@ -430,7 +475,9 @@ class LogSymptomViewModel(
             val envOutcome = if (isEditing) {
                 EnvironmentalOutcome(snapshot = draft.toSnapshot(), warning = null)
             } else {
-                maybeFetchEnvironmental(
+                fetchEnvironmental(
+                    service = environmentalService,
+                    timeoutMillis = environmentalTimeoutMillis,
                     lat = capture.latitude,
                     lng = capture.longitude,
                 )
@@ -495,13 +542,15 @@ class LogSymptomViewModel(
             // useful than no log at all.
             val photoWarning = flushPendingPhotos(savedId, current.pendingPhotoUris)
 
-            // Reconcile the diagnosis link. On edit we may be removing a
-            // link the user turned off in the picker, so "null selection"
-            // is a meaningful state (not a no-op). Failures are swallowed
-            // — the log itself is already saved and a missing link is
-            // recoverable from the doctor-visits screen.
-            applyDiagnosisLink(savedId, current.selectedDiagnosisId)
-            applyConditionLink(savedId, current.selectedConditionId)
+            // Reconcile the grouping link. The merged picker enforces
+            // mutual exclusivity — at most one of (diagnosis, condition)
+            // is set, and "null" is a meaningful state (the user
+            // unlinked it). The dispatcher below clears BOTH sides
+            // before setting the chosen one so pre-merge data with
+            // both links populated normalises on first save. Failures
+            // are swallowed — the log itself is already saved and a
+            // missing link is recoverable from the picker.
+            applyGroupingLink(savedId, current.selectedGroupingId)
             // Pick the most important warning to surface. Location warnings
             // already exist from the previous story; the environmental layer
             // adds its own (timeout, offline, API error). Both go to the same
@@ -534,28 +583,43 @@ class LogSymptomViewModel(
     }
 
     /**
-     * Persist the selected-diagnosis state by either attaching the log
-     * to one diagnosis (replacing any prior link) or detaching it from
-     * all diagnoses. Silently no-ops when the repo isn't wired.
+     * Persist the merged grouping selection.
+     *
+     * The schema still has two link tables (`doctor_diagnosis_logs`
+     * and `health_condition_logs`); the merged picker just makes them
+     * mutually exclusive at the UX layer. To keep that invariant in
+     * the database we always clear BOTH sides before applying the
+     * chosen one, so a log that previously had both links populated
+     * (possible on pre-merge data) is normalised on first save.
+     *
+     * Failures are swallowed — the log itself is already saved and
+     * recovering a missing link only takes one tap on the picker.
      */
-    private suspend fun applyDiagnosisLink(logId: Long, diagnosisId: Long?) {
-        val repo = doctorVisitRepository ?: return
-        runCatching {
-            if (diagnosisId != null) {
-                repo.attachLogToDiagnosis(logId, diagnosisId)
-            } else {
-                repo.detachLogFromAllDiagnoses(logId)
-            }
-        }
-    }
+    private suspend fun applyGroupingLink(logId: Long, groupingId: String?) {
+        val diagnosisId = LogGrouping.diagnosisIdFor(groupingId)
+        val conditionId = LogGrouping.conditionIdFor(groupingId)
 
-    /**
-     * Persist the selected user-condition link (or clear it). Mirrors
-     * [applyDiagnosisLink] — silently no-ops when the repo isn't wired.
-     */
-    private suspend fun applyConditionLink(logId: Long, conditionId: Long?) {
-        val repo = healthConditionRepository ?: return
-        runCatching { repo.setLogCondition(logId, conditionId) }
+        // Clear the side that's NOT being set, even when both repos
+        // are wired. This normalises pre-merge rows and is a no-op for
+        // logs that only had one side linked. Failures are logged for
+        // diagnosability but not surfaced — the primary save already
+        // succeeded and the user can re-pick from the editor to retry.
+        runCatching {
+            if (diagnosisId == null) doctorVisitRepository?.detachLogFromAllDiagnoses(logId)
+        }.onFailure { Log.w(TAG, "Detach diagnoses for log $logId failed", it) }
+        runCatching {
+            if (conditionId == null) healthConditionRepository?.setLogCondition(logId, null)
+        }.onFailure { Log.w(TAG, "Clear condition link for log $logId failed", it) }
+
+        // Apply the chosen side.
+        runCatching {
+            when {
+                diagnosisId != null -> doctorVisitRepository?.attachLogToDiagnosis(logId, diagnosisId)
+                conditionId != null -> healthConditionRepository?.setLogCondition(logId, conditionId)
+                // null grouping → both sides cleared above; nothing further to do.
+                else -> Unit
+            }
+        }.onFailure { Log.w(TAG, "Apply grouping link for log $logId failed", it) }
     }
 
     /**
@@ -583,139 +647,11 @@ class LogSymptomViewModel(
         }
     }
 
-    private data class EnvironmentalOutcome(
-        val snapshot: EnvironmentalSnapshot,
-        val warning: String?,
-    )
-
-    /**
-     * Runs the 5-second environmental fetch. Skipped when there is no location
-     * (nothing to look up) or no service bound (tests, headless builds).
-     *
-     * Every failure mode is translated into a non-blocking Snackbar message
-     * via [EnvironmentalOutcome.warning]. The snapshot is returned as-is —
-     * the outer save flow persists whatever fields came back, even a partial
-     * success, without ever crashing the save.
-     */
-    private suspend fun maybeFetchEnvironmental(
-        lat: Double?,
-        lng: Double?,
-    ): EnvironmentalOutcome {
-        if (lat == null || lng == null) {
-            return EnvironmentalOutcome(EnvironmentalSnapshot.EMPTY, warning = null)
-        }
-        val service = environmentalService
-            ?: return EnvironmentalOutcome(EnvironmentalSnapshot.EMPTY, warning = null)
-
-        return try {
-            val result = withTimeout(environmentalTimeoutMillis) {
-                service.fetch(lat, lng)
-            }
-            when (result) {
-                is EnvironmentalFetchResult.Success ->
-                    EnvironmentalOutcome(result.snapshot, warning = null)
-                is EnvironmentalFetchResult.NoNetwork ->
-                    EnvironmentalOutcome(
-                        EnvironmentalSnapshot.EMPTY,
-                        warning = "No internet — saved without weather data.",
-                    )
-                is EnvironmentalFetchResult.Timeout ->
-                    EnvironmentalOutcome(
-                        EnvironmentalSnapshot.EMPTY,
-                        warning = "Weather service timed out — saved without it.",
-                    )
-                is EnvironmentalFetchResult.ApiError ->
-                    EnvironmentalOutcome(
-                        EnvironmentalSnapshot.EMPTY,
-                        warning = result.message,
-                    )
-            }
-        } catch (_: TimeoutCancellationException) {
-            // withTimeout fired before the service finished — this is the
-            // authoritative 5s SLA enforcement. The request is cancelled
-            // cooperatively; we map it to the same Timeout UX as a
-            // service-level timeout.
-            EnvironmentalOutcome(
-                EnvironmentalSnapshot.EMPTY,
-                warning = "Weather service timed out — saved without it.",
-            )
-        } catch (error: Exception) {
-            // Defensive catch-all — a mis-implemented service could throw
-            // something unexpected. We MUST NOT crash the save flow.
-            EnvironmentalOutcome(
-                EnvironmentalSnapshot.EMPTY,
-                warning = "Weather unavailable: ${error.message ?: "unexpected error"}",
-            )
-        }
-    }
-
-    private data class CaptureOutcome(
-        val latitude: Double?,
-        val longitude: Double?,
-        val name: String? = null,
-        val warning: String? = null,
-    )
-
-    private suspend fun maybeCaptureLocation(
-        attach: Boolean,
-        permissionGranted: Boolean,
-        fallbackLat: Double?,
-        fallbackLng: Double?,
-        fallbackName: String?,
-    ): CaptureOutcome {
-        if (!attach) return CaptureOutcome(latitude = null, longitude = null)
-        val provider = locationProvider
-            ?: return CaptureOutcome(
-                latitude = fallbackLat,
-                longitude = fallbackLng,
-                name = fallbackName,
-                warning = "Location services unavailable on this device.",
-            )
-        if (!permissionGranted) {
-            return CaptureOutcome(
-                latitude = fallbackLat,
-                longitude = fallbackLng,
-                name = fallbackName,
-                warning = "Location permission not granted — location not attached.",
-            )
-        }
-        return when (val result = provider.fetchCurrentLocation()) {
-            is LocationResult.Coordinates -> {
-                // Round FIRST — every downstream consumer (DB, geocoder, UI)
-                // sees the same ~1 km grid.
-                val roundedLat = CoordinateRounding.roundCoordinate(result.latitude)
-                val roundedLng = CoordinateRounding.roundCoordinate(result.longitude)
-                // Reverse geocode on the rounded pair — never the raw fix.
-                // Runs once here at save time; the resulting string is
-                // persisted and re-read, never recomputed on UI bind.
-                val name = reverseGeocoder?.reverseGeocode(roundedLat, roundedLng)
-                    ?: ReverseGeocoder.UNAVAILABLE
-                CaptureOutcome(
-                    latitude = roundedLat,
-                    longitude = roundedLng,
-                    name = name,
-                )
-            }
-            is LocationResult.PermissionDenied -> CaptureOutcome(
-                latitude = fallbackLat,
-                longitude = fallbackLng,
-                name = fallbackName,
-                warning = "Location permission denied — location not attached.",
-            )
-            is LocationResult.Unavailable -> CaptureOutcome(
-                latitude = fallbackLat,
-                longitude = fallbackLng,
-                name = fallbackName,
-                warning = "Couldn't get a location fix — saved without it.",
-            )
-            is LocationResult.Failed -> CaptureOutcome(
-                latitude = fallbackLat,
-                longitude = fallbackLng,
-                name = fallbackName,
-                warning = "Location error: ${result.message}",
-            )
-        }
-    }
+    // EnvironmentalOutcome / CaptureOutcome data classes and the
+    // `fetchEnvironmental` / `captureLocation` save-time helpers live
+    // in LogSymptomCaptureHelpers.kt. They're pure orchestration over
+    // injected dependencies, so lifting them out keeps the VM
+    // focused on UI state.
 
     private inline fun updateDraft(field: LogField?, transform: LogDraft.() -> LogDraft) {
         _state.update { current ->
@@ -726,6 +662,8 @@ class LogSymptomViewModel(
     }
 
     companion object {
+        private const val TAG = "LogSymptomViewModel"
+
         /**
          * Environmental fetch SLA enforced by `withTimeout(...)` in the save
          * pipeline. Kept as a constant so tests can parameterise it without

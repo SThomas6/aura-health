@@ -31,7 +31,7 @@ import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.ExposedDropdownMenuBox
 import androidx.compose.material3.ExposedDropdownMenuDefaults
-import androidx.compose.material3.MenuAnchorType
+import androidx.compose.material3.ExposedDropdownMenuAnchorType
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
@@ -72,6 +72,19 @@ import java.util.Locale
 // change the picks taps through to this screen.
 // ──────────────────────────────────────────────────────────────────────
 
+/**
+ * Fullscreen Trends dashboard composable.
+ *
+ * Pulls every control surface (range chips, symptom picker, multi-select
+ * overlay sheet, prev/next/today nav) onto a single scrollable column so
+ * the user can see how their selections shape the chart in real time.
+ * Pairs with [TrendVisualisationViewModel] which owns the actual data
+ * layer; this composable is intentionally a thin presentation shell.
+ *
+ * The window-nav row defers to the VM's [TrendVisualisationViewModel.canStepForward]
+ * flag rather than computing it inline — that keeps the "we never scroll
+ * past now" rule single-sourced in the VM.
+ */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun TrendVisualisationScreen(
@@ -309,7 +322,7 @@ private fun SymptomPicker(
                 },
                 colors = ExposedDropdownMenuDefaults.outlinedTextFieldColors(),
                 modifier = Modifier
-                    .menuAnchor(MenuAnchorType.PrimaryNotEditable)
+                    .menuAnchor(ExposedDropdownMenuAnchorType.PrimaryNotEditable)
                     .fillMaxWidth()
                     .testTag("trends_symptom_picker"),
             )
@@ -396,7 +409,7 @@ private fun OverlaysDropdown(
                 },
                 colors = ExposedDropdownMenuDefaults.outlinedTextFieldColors(),
                 modifier = Modifier
-                    .menuAnchor(MenuAnchorType.PrimaryNotEditable)
+                    .menuAnchor(ExposedDropdownMenuAnchorType.PrimaryNotEditable)
                     .fillMaxWidth()
                     .testTag("trends_overlays"),
             )
@@ -476,8 +489,13 @@ private fun ChartCard(state: TrendUiState) {
                     style = MaterialTheme.typography.titleLarge,
                     modifier = Modifier.weight(1f),
                 )
+                // Read the locale through LocalConfiguration so the
+                // uppercased label recomposes if the user changes the
+                // system language at runtime (Compose lint flags the
+                // bare `Locale.getDefault()` for not subscribing).
+                val locale = androidx.compose.ui.platform.LocalConfiguration.current.locales[0]
                 Text(
-                    state.range.label.uppercase(Locale.getDefault()),
+                    state.range.label.uppercase(locale),
                     style = MaterialTheme.typography.labelMedium,
                     color = MaterialTheme.colorScheme.primary,
                 )

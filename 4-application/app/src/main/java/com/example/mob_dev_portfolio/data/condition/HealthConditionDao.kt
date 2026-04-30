@@ -8,6 +8,18 @@ import androidx.room.Query
 import androidx.room.Update
 import kotlinx.coroutines.flow.Flow
 
+/**
+ * Room access for the user-declared health-conditions feature. Splits
+ * cleanly into two halves: the `health_conditions` table holds one
+ * row per condition (e.g. "Type 2 Diabetes"), and the
+ * `health_condition_logs` join table pins individual symptom logs to
+ * a condition so History can group them and the AI sees them as
+ * already-explained context.
+ *
+ * Reactive `Flow` reads drive the live UI; `suspend` snapshots feed the
+ * background AI analysis pipeline (which runs once and exits, so a
+ * subscription would be wasted there).
+ */
 @Dao
 interface HealthConditionDao {
 

@@ -49,6 +49,12 @@ open class MedicationReminderNotifier(
     private val context: Context,
 ) {
 
+    /**
+     * Idempotently register the notification channel. Called from every
+     * post path because the receiver may run in a process state where
+     * the channel hasn't been re-registered yet (e.g. the OS killed the
+     * app and the receiver started a fresh process).
+     */
     open fun ensureChannel() {
         val manager = context.getSystemService(NotificationManager::class.java)
         if (manager.getNotificationChannel(CHANNEL_ID) != null) return
@@ -71,6 +77,15 @@ open class MedicationReminderNotifier(
         NotificationManagerCompat.from(context).cancel(notificationIdFor(reminderId))
     }
 
+    /**
+     * Post a heads-up reminder notification with Taken / Snooze actions.
+     * Silently no-ops if POST_NOTIFICATIONS is denied on API 33+ — the
+     * receiver still recorded the dose event, but the user isn't pinged.
+     *
+     * [eventId] is the dose-event row id that was just inserted; it
+     * travels through the action PendingIntents so a subsequent Taken /
+     * Snooze tap can update the exact row.
+     */
     open fun notifyReminder(reminder: MedicationReminder, eventId: Long) {
         ensureChannel()
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {

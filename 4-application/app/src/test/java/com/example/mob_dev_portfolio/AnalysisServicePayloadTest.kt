@@ -6,7 +6,6 @@ import com.example.mob_dev_portfolio.data.ai.AnalysisResult
 import com.example.mob_dev_portfolio.data.ai.AnalysisService
 import com.example.mob_dev_portfolio.data.ai.GeminiClient
 import com.example.mob_dev_portfolio.data.preferences.UserProfile
-import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.test.runTest
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
@@ -26,7 +25,6 @@ import java.util.TimeZone
  * We verify this without touching HTTP — a recording fake client captures
  * the request object and the test inspects every string field for leaks.
  */
-@OptIn(ExperimentalCoroutinesApi::class)
 class AnalysisServicePayloadTest {
 
     private class RecordingClient : GeminiClient {

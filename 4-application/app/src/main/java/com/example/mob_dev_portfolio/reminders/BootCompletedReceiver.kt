@@ -3,6 +3,7 @@ package com.example.mob_dev_portfolio.reminders
 import android.content.BroadcastReceiver
 import android.content.Context
 import android.content.Intent
+import android.os.UserManager
 import android.util.Log
 import com.example.mob_dev_portfolio.AuraApplication
 import kotlinx.coroutines.CoroutineScope
@@ -20,9 +21,17 @@ import kotlinx.coroutines.launch
  *
  * The manifest filter also includes `ACTION_LOCKED_BOOT_COMPLETED` so
  * reminders rearm as early as possible on devices with a direct-boot
- * lock screen; we read from DataStore + Room after user unlock only,
- * but the Application's `onCreate` will have bootstrapped by the time
- * this receiver runs.
+ * lock screen. **However**, our DataStore and Room/SQLCipher are NOT
+ * `directBootAware` — they live in credential-encrypted storage which
+ * is unreadable until the user has unlocked the device for the first
+ * time after boot. Touching them pre-unlock throws.
+ *
+ * So when `LOCKED_BOOT_COMPLETED` fires, we early-return without doing
+ * any DB work. The follow-up `BOOT_COMPLETED` broadcast (which fires
+ * once the user unlocks) does the actual rearm. This trades a tiny
+ * window of un-armed reminders (between boot and first unlock) for not
+ * silently losing them entirely on FBE devices, which is what happened
+ * before this guard.
  */
 class BootCompletedReceiver : BroadcastReceiver() {
 
@@ -34,6 +43,25 @@ class BootCompletedReceiver : BroadcastReceiver() {
             action != Intent.ACTION_LOCKED_BOOT_COMPLETED &&
             action != "android.intent.action.MY_PACKAGE_REPLACED"
         ) return
+
+        // Direct-boot guard. On FBE devices (every modern Android),
+        // credential-encrypted storage — which is where our DataStore
+        // and SQLCipher database live — isn't readable until the user
+        // unlocks for the first time after boot. Attempting any DB
+        // work before that will fail noisily. Defer to the follow-up
+        // BOOT_COMPLETED broadcast, which fires post-unlock.
+        //
+        // We resolve UserManager defensively: if the cast or the
+        // service lookup ever returned null (it shouldn't on our
+        // minSdk, but the API is `Object`-typed and we don't trust
+        // OEM ROMs), we'd rather skip the rearm than risk the silent
+        // pre-unlock failure mode this guard exists to prevent. The
+        // follow-up BOOT_COMPLETED will retry once the user unlocks.
+        val userManager = context.getSystemService(Context.USER_SERVICE) as? UserManager
+        if (userManager == null || !userManager.isUserUnlocked) {
+            Log.i(TAG, "Skipping rearm on $action — user not unlocked yet (userManager=${userManager != null})")
+            return
+        }
 
         val pending = goAsync()
         scope.launch {

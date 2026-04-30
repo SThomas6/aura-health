@@ -31,7 +31,6 @@ import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
-import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
@@ -81,6 +80,21 @@ import java.util.Locale
 // already exists on `SymptomLog` and `HomeInsights` — no backend changes.
 // ──────────────────────────────────────────────────────────────────────
 
+/**
+ * Home dashboard composable — the app's launch surface.
+ *
+ * Composes a column of independent cards (greeting, hero CTA, insights,
+ * trends preview, health dashboard, recent activity, secondary CTAs)
+ * driven by the small [HomeViewModel] state surface. Every navigation
+ * affordance is a separate callback parameter rather than a single
+ * "navigate" lambda, so the parent NavHost can wire each tile to the
+ * exact destination/back-stack handling it needs.
+ *
+ * Cards re-use the same Compose subcomponents in the trends and health
+ * directories — this composable is deliberately a thin orchestrator so
+ * shared visual elements stay testable in isolation and the home layout
+ * isn't fighting their internal state.
+ */
 @Composable
 fun HomeScreen(
     onLogSymptomClick: () -> Unit,
@@ -556,7 +570,6 @@ private fun TrendChart(
         // Same numeric value as `strokePx` but documents intent — bars
         // are inset by one stroke-width from the top so the rounded
         // top edges aren't clipped by the canvas bounds.
-        @Suppress("UnnecessaryVariable")
         val topInset = strokePx
         val plotHeight = canvasHeight - topInset
 
@@ -586,7 +599,12 @@ private fun TrendChart(
 
 @Composable
 private fun TrendLabels(trend: List<DailyCount>) {
-    val formatter = DateTimeFormatter.ofPattern("EEE", Locale.getDefault())
+    // Read the locale from LocalConfiguration so the labels recompose
+    // when the user changes the system language at runtime — Compose's
+    // NonObservableLocale lint catches the bare `Locale.getDefault()`
+    // call because it doesn't subscribe to that change.
+    val locale = androidx.compose.ui.platform.LocalConfiguration.current.locales[0]
+    val formatter = DateTimeFormatter.ofPattern("EEE", locale)
     Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
         trend.forEach { entry ->
             Text(

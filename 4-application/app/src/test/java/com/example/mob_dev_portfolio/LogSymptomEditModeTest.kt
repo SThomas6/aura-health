@@ -18,6 +18,7 @@ import kotlinx.coroutines.test.runTest
 import kotlinx.coroutines.test.setMain
 import org.junit.After
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNotNull
 import org.junit.Assert.assertTrue
 import org.junit.Before
@@ -139,9 +140,9 @@ class LogSymptomEditModeTest {
         vm.save { savedCallbackInvoked = true }
         advanceUntilIdle()
 
-        org.junit.Assert.assertFalse("onSaved must not fire when update affected 0 rows", savedCallbackInvoked)
+        assertFalse("onSaved must not fire when update affected 0 rows", savedCallbackInvoked)
         val state = vm.state.value
-        org.junit.Assert.assertNotNull("A transient error should be surfaced", state.transientError)
+        assertNotNull("A transient error should be surfaced", state.transientError)
         assertEquals(false, state.isSaving)
     }
 }

@@ -77,6 +77,24 @@ import java.time.format.DateTimeFormatter
 
 private val DateTimeFormat: DateTimeFormatter = DateTimeFormatter.ofPattern("EEE d MMM yyyy · HH:mm")
 
+/**
+ * Read-only detail view for a single symptom log.
+ *
+ * Reachable from the Symptoms list, the Home recent-logs strip, and the
+ * Doctor-visit detail "linked logs" section. The screen orchestrates four
+ * cross-cutting concerns:
+ *
+ *  - Live-data display: severity hero, environmental conditions, photo
+ *    gallery, doctor annotation badge.
+ *  - "End now" quick-action for ongoing symptoms — one tap stamps an end
+ *    time without sending the user through the full editor, with snackbar
+ *    Undo so a fat-finger doesn't lose the still-ongoing state.
+ *  - Edit + delete affordances. Delete is gated by an AlertDialog and
+ *    survives transient failures via a Snackbar retry path.
+ *  - Graceful "deleted while you weren't looking" handling: the log Flow
+ *    can emit [DetailLogState.NotFound] at any moment, which we render
+ *    as a polite "no longer available" rather than crashing.
+ */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun LogDetailScreen(
@@ -113,6 +131,16 @@ fun LogDetailScreen(
             } else {
                 viewModel.dismissDeleteError()
             }
+        }
+    }
+
+    // Surface non-delete write failures (end-now / undo). Same snackbar
+    // host as deleteError but no Retry action — the user can simply
+    // re-tap the underlying button.
+    LaunchedEffect(ui.transientError) {
+        ui.transientError?.let { message ->
+            snackbarHost.showSnackbar(message = message)
+            viewModel.dismissTransientError()
         }
     }
 

@@ -41,6 +41,8 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
@@ -228,7 +230,17 @@ private fun ReminderCard(
                         )
                     }
                 }
-                Switch(checked = row.reminder.enabled, onCheckedChange = onToggle)
+                Switch(
+                    checked = row.reminder.enabled,
+                    onCheckedChange = onToggle,
+                    modifier = Modifier.semantics {
+                        contentDescription = if (row.reminder.enabled) {
+                            "${row.reminder.name} reminder is active. Double-tap to pause."
+                        } else {
+                            "${row.reminder.name} reminder is paused. Double-tap to re-enable."
+                        }
+                    },
+                )
             }
             Spacer(Modifier.height(6.dp))
             Text(

@@ -30,6 +30,20 @@ data class StoredAnalysis(
     val completedAtEpochMillis: Long,
 )
 
+/**
+ * DataStore-backed persistence for the latest [StoredAnalysis] (see
+ * the doc comment on the data class above for what we persist and why
+ * only successes land here).
+ *
+ * Stored in its own preferences file (`aura_analysis_result`) rather
+ * than the encrypted Room database so the result is reachable from
+ * the notification-tap deep-link path without unlocking SQLCipher —
+ * a tap on the lock-screen notification immediately renders the
+ * summary even if the user hasn't authenticated yet.
+ *
+ * Methods are `open` so view-model unit tests can swap in an in-memory
+ * fake without touching the real DataStore plumbing.
+ */
 open class AnalysisResultStore(
     private val dataStore: DataStore<Preferences>,
 ) {

@@ -3,7 +3,6 @@ package com.example.mob_dev_portfolio
 import com.example.mob_dev_portfolio.data.environment.EnvironmentalFetchResult
 import com.example.mob_dev_portfolio.data.environment.OpenMeteoEnvironmentalService
 import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.test.runTest
 import okhttp3.OkHttpClient
 import okhttp3.mockwebserver.Dispatcher
@@ -28,7 +27,6 @@ import java.util.concurrent.TimeUnit
  * queue order because the two endpoints are fetched in parallel — there is
  * no guaranteed arrival order.
  */
-@OptIn(ExperimentalCoroutinesApi::class)
 class OpenMeteoEnvironmentalServiceTest {
 
     private lateinit var server: MockWebServer

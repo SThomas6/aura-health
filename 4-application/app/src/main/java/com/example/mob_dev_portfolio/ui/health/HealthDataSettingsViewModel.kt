@@ -8,7 +8,6 @@ import com.example.mob_dev_portfolio.AuraApplication
 import com.example.mob_dev_portfolio.BuildConfig
 import com.example.mob_dev_portfolio.data.health.HealthConnectMetric
 import com.example.mob_dev_portfolio.data.health.HealthConnectService
-import com.example.mob_dev_portfolio.data.health.HealthMetricCategory
 import com.example.mob_dev_portfolio.data.health.HealthPreferencesRepository
 import com.example.mob_dev_portfolio.data.health.HealthSampleSeeder
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -108,12 +107,38 @@ class HealthDataSettingsViewModel(
         }
     }
 
+    /**
+     * Master AI-inclusion toggle — independent of the connection state so
+     * the user can keep the dashboard charts visible while opting out of
+     * having their readings included in the analysis prompt.
+     */
     fun setIntegrationEnabled(enabled: Boolean) {
         viewModelScope.launch { preferencesRepository.setIntegrationEnabled(enabled) }
     }
 
+    /**
+     * Per-metric toggle. The screen pairs an "enabled but not granted"
+     * row with an inline Grant CTA, so flipping this on without a grant
+     * is a valid intermediate state — the row chrome just nudges the
+     * user toward the permission request.
+     */
     fun setMetricEnabled(metric: HealthConnectMetric, enabled: Boolean) {
         viewModelScope.launch { preferencesRepository.setEnabled(metric, enabled) }
+    }
+
+    /**
+     * Bulk-toggle every catalogue metric. Used by the screen's
+     * "Select all" / "Deselect all" affordance so the user doesn't have
+     * to flip 12 switches individually. Permission requests for any
+     * not-yet-granted metrics are kicked off by the screen — the VM only
+     * owns the preference state, not the launcher.
+     */
+    fun setAllMetricsEnabled(enabled: Boolean) {
+        viewModelScope.launch {
+            HealthConnectMetric.entries.forEach { metric ->
+                preferencesRepository.setEnabled(metric, enabled)
+            }
+        }
     }
 
     /**
@@ -143,7 +168,7 @@ class HealthDataSettingsViewModel(
      * integration and active grants. Also auto-seeds 14 days of demo
      * data on first connect so the dashboard has graphs to render.
      *
-     * Notice we flip BOTH [connectionActive] and [integrationEnabled] on
+     * Notice we flip BOTH `connectionActive` and `integrationEnabled` on
      * — Connect defaults the AI toggle on so the common case is "tap
      * once, everything works". Users who want to stay connected but opt
      * out of AI inclusion flip that toggle off separately.
@@ -161,7 +186,7 @@ class HealthDataSettingsViewModel(
 
     /**
      * Auto-seed 14 days of plausible sample data on every successful
-     * Connect. We deliberately do NOT gate on [sampleSeeded] — the
+     * Connect. We deliberately do NOT gate on `sampleSeeded` — the
      * seeder is idempotent via deterministic `clientRecordId`s and
      * purges its own prior records before writing, so a re-Connect
      * always lands the user on a fresh two-week window ending today.
@@ -176,7 +201,7 @@ class HealthDataSettingsViewModel(
      *   - The seeder's HC-side upsert semantics mean re-running is
      *     free — it's a handful of insertRecords calls that HC resolves
      *     to no-op or replacement writes.
-     *   - The [sampleSeeded] preference is still flipped on success,
+     *   - The `sampleSeeded` preference is still flipped on success,
      *     kept purely as a telemetry signal for future analytics.
      *
      * Silent on both success and failure — the dashboard is the
@@ -195,6 +220,7 @@ class HealthDataSettingsViewModel(
         }
     }
 
+    /** Clears the snackbar one-shot once the host has displayed the message. */
     fun dismissMessage() {
         transientMessageFlow.value = null
     }
@@ -217,14 +243,6 @@ class HealthDataSettingsViewModel(
             readPerms
         }
     }
-
-    /**
-     * Helper to group the metric rows by category for the settings UI.
-     * Done here (rather than in the composable) so a future screenshot
-     * test can pin the ordering.
-     */
-    fun groupedRows(): Map<HealthMetricCategory, List<HealthMetricRowState>> =
-        state.value.metricRows.groupBy { it.metric.category }
 
     companion object {
         val Factory: ViewModelProvider.Factory = object : ViewModelProvider.Factory {

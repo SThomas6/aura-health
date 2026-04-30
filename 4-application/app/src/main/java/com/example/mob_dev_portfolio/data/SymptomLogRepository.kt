@@ -6,7 +6,26 @@ import com.example.mob_dev_portfolio.ui.history.HistorySort
 import com.example.mob_dev_portfolio.ui.log.LogValidator
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.map
+import kotlinx.serialization.builtins.ListSerializer
+import kotlinx.serialization.builtins.serializer
+import kotlinx.serialization.json.Json
 
+/**
+ * Domain-facing wrapper around [SymptomLogDao]. Keeps the Room entity
+ * type behind the data layer boundary so view-models work with the
+ * cleaner [SymptomLog] data class — the entity-to-domain mapping is
+ * the only place context-tag deserialisation lives.
+ *
+ * The class is `open` (and the methods are `open`) so view-model unit
+ * tests can subclass with a fake without needing an interface. The
+ * production app injects a single instance via [com.example.mob_dev_portfolio.AppContainer].
+ *
+ * History filtering is partly DAO and partly in-memory: the SQL query
+ * handles severity range, date window, free-text LIKE, and sort, but
+ * tag filtering is applied here on the materialised list because Room
+ * cannot trivially express "row's serialised tag string contains every
+ * one of N tags".
+ */
 open class SymptomLogRepository(
     private val dao: SymptomLogDao,
     /**
@@ -50,8 +69,6 @@ open class SymptomLogRepository(
     open fun observeById(id: Long): Flow<SymptomLog?> =
         dao.observeById(id).map { it?.toDomain() }
 
-    open fun observeCount(): Flow<Int> = dao.observeCount()
-
     open suspend fun save(log: SymptomLog): Long = dao.insert(log.toEntity())
 
     open suspend fun update(log: SymptomLog): Int = dao.update(log.toEntity())
@@ -76,6 +93,11 @@ private val HistorySort.daoKey: String
         HistorySort.NameAsc -> "NAME_ASC"
     }
 
+/**
+ * Domain twin of [SymptomLogEntity]. Holds [contextTags] as a real
+ * `List<String>` (already deserialised) so view-models and the UI
+ * never touch the on-disk encoding.
+ */
 data class SymptomLog(
     val id: Long = 0L,
     val symptomName: String,
@@ -118,7 +140,7 @@ private fun SymptomLog.toEntity() = SymptomLogEntity(
     endEpochMillis = endEpochMillis,
     severity = severity,
     medication = medication,
-    contextTags = contextTags.joinToString("|"),
+    contextTags = encodeContextTags(contextTags),
     notes = notes,
     createdAtEpochMillis = createdAtEpochMillis,
     locationLatitude = locationLatitude,
@@ -140,7 +162,7 @@ private fun SymptomLogEntity.toDomain() = SymptomLog(
     endEpochMillis = endEpochMillis,
     severity = severity,
     medication = medication,
-    contextTags = if (contextTags.isBlank()) emptyList() else contextTags.split("|"),
+    contextTags = decodeContextTags(contextTags),
     notes = notes,
     createdAtEpochMillis = createdAtEpochMillis,
     locationLatitude = locationLatitude,
@@ -153,3 +175,32 @@ private fun SymptomLogEntity.toDomain() = SymptomLog(
     pressureHpa = pressureHpa,
     airQualityIndex = airQualityIndex,
 )
+
+// ── Context-tag serialization ─────────────────────────────────────────
+//
+// The original format was a pipe-joined string ("fatigue|stress"), which
+// silently corrupts any tag value containing a `|`. The catalog never
+// shipped one, but the same column is also written by AI summary
+// suggestions and by future user-defined tags, so the format is now
+// JSON.
+//
+// Reads accept either format: anything starting with `[` is parsed as a
+// JSON array; anything else is treated as legacy pipe-delimited and is
+// rewritten on the next save. No explicit migration is needed because
+// every read passes through this decoder.
+
+private val contextTagsJson = Json { ignoreUnknownKeys = true }
+private val contextTagsSerializer = ListSerializer(String.serializer())
+
+internal fun encodeContextTags(tags: List<String>): String =
+    if (tags.isEmpty()) "" else contextTagsJson.encodeToString(contextTagsSerializer, tags)
+
+internal fun decodeContextTags(raw: String): List<String> {
+    if (raw.isBlank()) return emptyList()
+    return if (raw.startsWith("[")) {
+        runCatching { contextTagsJson.decodeFromString(contextTagsSerializer, raw) }
+            .getOrElse { raw.split("|").filter { it.isNotEmpty() } }
+    } else {
+        raw.split("|").filter { it.isNotEmpty() }
+    }
+}

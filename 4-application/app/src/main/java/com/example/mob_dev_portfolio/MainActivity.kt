@@ -98,7 +98,7 @@ class MainActivity : FragmentActivity() {
      */
     override fun onNewIntent(newIntent: Intent) {
         super.onNewIntent(newIntent)
-        setIntent(newIntent)
+        intent = newIntent
         handleDeepLinkIntent(newIntent)
     }
 

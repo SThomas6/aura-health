@@ -42,6 +42,13 @@ class DoctorListViewModel(
             initialValue = DoctorListUiState(),
         )
 
+    /**
+     * Fire-and-forget delete of a visit. The repository's underlying Room
+     * cascade un-clears any linked symptom logs and removes diagnosis tags,
+     * so the AI starts considering those logs again on the next analysis —
+     * the confirm-dialog copy on the screen warns the user about exactly
+     * that side effect.
+     */
     fun deleteVisit(id: Long) {
         viewModelScope.launch {
             repository.deleteVisit(id)

@@ -9,6 +9,7 @@ import androidx.compose.runtime.remember
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.testTag
+import androidx.compose.ui.res.stringResource
 import androidx.lifecycle.viewmodel.compose.viewModel
 import androidx.navigation.NavController
 import androidx.navigation.NavDestination.Companion.hasRoute
@@ -62,6 +63,28 @@ import com.example.mob_dev_portfolio.ui.report.ReportHistoryScreen
 import com.example.mob_dev_portfolio.ui.settings.SettingsScreen
 import com.example.mob_dev_portfolio.ui.trends.TrendVisualisationScreen
 
+/**
+ * Top-level app composable that wires the `NavigationSuiteScaffold` (adaptive
+ * bottom-bar / nav-rail / nav-drawer depending on window size class) to the
+ * type-safe `NavHost` graph.
+ *
+ * Three responsibilities live here:
+ *  1. Hosting the [androidx.navigation.compose.NavHost] for every screen the
+ *     user can reach. Routes are declared as `@Serializable` data
+ *     classes/objects (see [com.example.mob_dev_portfolio.ui.navigation]) so
+ *     destination args are checked at compile time.
+ *  2. Computing per-tab "selected" state. A nested destination should still
+ *     keep its parent tab highlighted (e.g. the symptom-detail screen lives
+ *     under the Symptoms tab) — the [hierarchy] check below covers every
+ *     route that should adopt each tab as its visual home.
+ *  3. Reacting to one-shot deep-link events from `MainActivity` (notification
+ *     taps + Health Connect rationale intent) by reading the latest target
+ *     out of [DeepLinkEvents] and routing to the appropriate destination.
+ *
+ * Navigation uses pop/save/restore-free semantics for top-level tabs so the
+ * bottom bar always lands on the tab root rather than restoring an arbitrary
+ * nested screen — the rationale is documented at [navigateToTopLevel].
+ */
 @Composable
 fun AuraApp() {
     val navController = rememberNavController()
@@ -108,9 +131,15 @@ fun AuraApp() {
         }
     }
 
+    // Resolve labels outside the navigationSuiteItems lambda — that
+    // lambda is a plain `NavigationSuiteScope.() -> Unit`, not a
+    // `@Composable` lambda, so `stringResource` can't be invoked
+    // inside it. We pre-fetch the strings into a parallel list.
+    val destinationLabels = TopLevelDestinations.map { stringResource(it.labelRes) }
+
     NavigationSuiteScaffold(
         navigationSuiteItems = {
-            TopLevelDestinations.forEach { dest ->
+            TopLevelDestinations.forEachIndexed { index, dest ->
                 val selected = when (dest.route) {
                     TopLevelRoute.Home -> hierarchy?.any { it.hasRoute<TopLevelRoute.Home>() } == true
                     // The Symptoms tab owns the list, the per-log detail,
@@ -137,12 +166,15 @@ fun AuraApp() {
                             it.hasRoute<DoctorVisitEditorRoute>()
                     } == true
                 }
+                val label = destinationLabels[index]
                 item(
                     selected = selected,
                     onClick = { navigateToTopLevel(navController, dest.route) },
-                    icon = { Icon(dest.icon, contentDescription = dest.label) },
-                    label = { Text(dest.label) },
-                    modifier = Modifier.testTag("nav_${dest.label.lowercase()}"),
+                    icon = { Icon(dest.icon, contentDescription = label) },
+                    label = { Text(label) },
+                    // testTag uses the locale-independent id so UI tests
+                    // don't break when the label is translated.
+                    modifier = Modifier.testTag("nav_${dest.testTagId}"),
                 )
             }
         },

@@ -7,7 +7,6 @@ import com.example.mob_dev_portfolio.data.ai.AnalysisService
 import com.example.mob_dev_portfolio.data.ai.GeminiClient
 import com.example.mob_dev_portfolio.data.doctor.DoctorContextSnapshot
 import com.example.mob_dev_portfolio.data.preferences.UserProfile
-import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.test.runTest
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
@@ -27,7 +26,6 @@ import java.util.TimeZone
  * no network, no DB. Every assertion here is on the [AnalysisRequest]
  * that *would* be sent, which is the real contract surface.
  */
-@OptIn(ExperimentalCoroutinesApi::class)
 class AnalysisServiceDoctorContextTest {
 
     private class RecordingClient : GeminiClient {

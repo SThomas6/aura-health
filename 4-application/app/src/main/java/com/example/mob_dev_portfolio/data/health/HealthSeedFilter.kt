@@ -19,7 +19,7 @@ import com.example.mob_dev_portfolio.BuildConfig
  *
  * Health Connect's `dataOriginFilter` API is include-only — there is no
  * "exclude this app's records" filter. So we filter post-read by the
- * deterministic `clientRecordId` prefix that [HealthSampleSeeder]
+ * deterministic `clientRecordId` prefix that `HealthSampleSeeder`
  * tags every seeded record with. Real records written by Samsung
  * Health, Fitbit, Google Fit, Health Connect's manual entry, etc.
  * never have this prefix and are passed through untouched.
@@ -43,14 +43,14 @@ import com.example.mob_dev_portfolio.BuildConfig
  */
 
 /**
- * Stable `clientRecordId` prefix written by [HealthSampleSeeder] on
+ * Stable `clientRecordId` prefix written by `HealthSampleSeeder` on
  * every seeded record. Mirrored here as a top-level public const so
  * the filter helper doesn't need to reach into the seeder's
  * companion object — the seeder is a write path, the filter is a
  * read path, and they should be able to evolve independently.
  *
- * If [HealthSampleSeeder.CLIENT_ID_PREFIX] ever changes, change this
- * value too — the unit test [HealthSeedFilterTest] pins them in sync.
+ * If `HealthSampleSeeder.CLIENT_ID_PREFIX` ever changes, change this
+ * value too — the unit test `HealthSeedFilterTest` pins them in sync.
  */
 internal const val SEED_CLIENT_ID_PREFIX = "aura-seed-v1"
 

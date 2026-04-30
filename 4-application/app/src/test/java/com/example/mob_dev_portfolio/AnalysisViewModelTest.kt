@@ -135,6 +135,46 @@ class AnalysisViewModelTest {
         assertTrue(success.summaryText.contains("Patterns"))
     }
 
+    /**
+     * Pins the "fresh-start" contract on the analysis surface: when the
+     * VM comes up and the result store already carries a prior run from
+     * a previous session, the screen must open in [AnalysisPhase.Idle].
+     * If it didn't, the user would tap into "Run AI analysis" and see
+     * last week's summary painted on top of the form — confusing the
+     * "kick off a new run" surface with the history view.
+     *
+     * The VM achieves this with `drop(1)` on the result-store flow:
+     * the cached emission at subscription time is skipped, while
+     * subsequent emissions (the worker-just-finished case covered by
+     * [stored_result_is_reflected_as_success_phase]) still flow
+     * through.
+     */
+    @Test
+    fun cached_prior_result_does_not_paint_success_on_screen_open() = runTest(testDispatcher) {
+        val store = FakeResultStore().apply {
+            emit(
+                StoredAnalysis(
+                    summaryText = "stale summary from last week",
+                    guidance = AnalysisGuidance.SeekAdvice,
+                    completedAtEpochMillis = 0L,
+                ),
+            )
+        }
+        val vm = AnalysisViewModel(
+            profileRepository = FakeProfileRepository(),
+            resultStore = store,
+            scheduler = RecordingScheduler(),
+            connectivity = { true },
+        )
+        testDispatcher.scheduler.advanceUntilIdle()
+
+        assertEquals(
+            "screen should open Idle even with a cached prior result",
+            AnalysisPhase.Idle,
+            vm.state.value.phase,
+        )
+    }
+
     @Test
     fun failed_work_surfaces_transient_error() = runTest(testDispatcher) {
         val scheduler = RecordingScheduler()
@@ -321,11 +361,9 @@ class AnalysisViewModelTest {
         }
 
         override fun currentWorkInfos(): Flow<List<WorkInfo>> = flow.asStateFlow()
-        override fun cancel() = Unit
         // The weekly schedule surface is outside the ViewModel's concerns,
-        // so the recording fake just swallows the calls.
+        // so the recording fake just swallows the call.
         override fun scheduleWeekly() = Unit
-        override fun cancelWeekly() = Unit
 
         fun emit(info: WorkInfo) {
             flow.value = listOf(info)

@@ -372,13 +372,18 @@ class HealthSampleSeeder(
     }
 
     /**
-     * Build a [Metadata] with a deterministic [clientRecordId] so
+     * Build a [Metadata] with a deterministic `clientRecordId` so
      * subsequent seed runs upsert rather than duplicate.
+     *
+     * The Health Connect SDK is pinned to 1.1.0-alpha11 (the last
+     * release that supports compileSdk 35). The public [Metadata]
+     * constructor is available on this version — the 1.1.0 stable
+     * release made it `internal` and exposed a `manualEntry(...)`
+     * factory instead, but we can't use that here.
      */
-    private fun seedMetadata(kind: String, daysAgo: Int): Metadata = Metadata(
-        clientRecordId = "$CLIENT_ID_PREFIX-$kind-d$daysAgo",
-        recordingMethod = Metadata.RECORDING_METHOD_MANUAL_ENTRY,
-    )
+    @Suppress("DEPRECATION")
+    private fun seedMetadata(kind: String, daysAgo: Int): Metadata =
+        Metadata(clientRecordId = "$CLIENT_ID_PREFIX-$kind-d$daysAgo")
 
     /**
      * The write-permission strings the seeder needs. Mirrors the read
