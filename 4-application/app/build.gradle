@@ -62,6 +62,13 @@ android {
         // a graphics-design task outside this submission's scope.
         // The app installs and runs fine on every launcher tested.
         disable += 'IconLauncherShape'
+        // GradleDependency: several artefacts (core-ktx, activity,
+        // lifecycle, navigation-compose, health-connect) are
+        // intentionally held back from their latest versions because
+        // the newer ones require compileSdk 36, and compileSdk is
+        // pinned to 35 above to match the proforma. The "newer
+        // version available" hint isn't actionable here.
+        disable += 'GradleDependency'
     }
 
     buildTypes {
