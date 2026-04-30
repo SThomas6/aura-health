@@ -1,6 +1,7 @@
 package com.example.mob_dev_portfolio.ui.home
 
 import androidx.compose.foundation.Canvas
+import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -51,11 +52,13 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.testTag
+import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewmodel.compose.viewModel
+import com.example.mob_dev_portfolio.R
 import com.example.mob_dev_portfolio.data.SymptomLog
 import com.example.mob_dev_portfolio.data.health.HealthConnectMetric
 import com.example.mob_dev_portfolio.ui.health.HealthDashboardSection
@@ -196,20 +199,20 @@ private fun GreetingRow() {
             .fillMaxWidth()
             .padding(vertical = 4.dp),
     ) {
-        Box(
+        // The launcher icon stands in for the "A" monogram so the
+        // greeting carries the same brand mark the user sees on their
+        // launcher / recents screen — a stronger identity cue than a
+        // single typeset letter. Clipped to a circle for visual rhythm
+        // with the avatars elsewhere in the app; contentDescription is
+        // null because the "Aura Health" text immediately to the right
+        // already names the brand for screen readers.
+        Image(
+            painter = painterResource(R.mipmap.ic_launcher),
+            contentDescription = null,
             modifier = Modifier
                 .size(40.dp)
-                .clip(CircleShape)
-                .background(MaterialTheme.colorScheme.primaryContainer),
-            contentAlignment = Alignment.Center,
-        ) {
-            Text(
-                "A",
-                color = MaterialTheme.colorScheme.onPrimaryContainer,
-                style = MaterialTheme.typography.titleSmall,
-                fontWeight = FontWeight.Bold,
-            )
-        }
+                .clip(CircleShape),
+        )
         Spacer(Modifier.size(12.dp))
         Column(modifier = Modifier.weight(1f)) {
             Text(
