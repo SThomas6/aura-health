@@ -62,6 +62,13 @@ open class MedicationReminderScheduler(
         setAlarm(reminderId, triggerAtMillis)
     }
 
+    /**
+     * Cancel any pending alarm for [reminderId]. Uses
+     * [PendingIntent.FLAG_NO_CREATE] so we only resolve the existing
+     * slot rather than allocating a fresh one — `cancel` on a never-
+     * scheduled id is a cheap no-op. The PendingIntent itself is also
+     * cancelled so its slot is freed.
+     */
     open fun cancel(reminderId: Long) {
         val pi = buildFirePendingIntent(reminderId, flags = PendingIntent.FLAG_NO_CREATE)
         if (pi != null) {
@@ -82,6 +89,11 @@ open class MedicationReminderScheduler(
         reminders.forEach { schedule(it, now) }
     }
 
+    /**
+     * Bulk-cancel pending alarms — used by the global kill-switch
+     * (FR-MR-08) when the user disables medication reminders without
+     * deleting the underlying schedules.
+     */
     open fun cancelAll(reminderIds: List<Long>) {
         reminderIds.forEach(::cancel)
     }

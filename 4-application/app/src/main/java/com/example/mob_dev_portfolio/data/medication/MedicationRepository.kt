@@ -86,15 +86,25 @@ open class MedicationRepository(
     private val doseEventDao: DoseEventDao,
 ) {
 
+    /** Hot stream of every saved reminder. The list rerenders on insert/update/delete. */
     open fun observeAll(): Flow<List<MedicationReminder>> =
         reminderDao.observeAll().map { list -> list.map { it.toDomain() } }
 
+    /** One-shot list of reminders — used by the scheduler when re-arming on boot. */
     open suspend fun listAll(): List<MedicationReminder> =
         reminderDao.listAll().map { it.toDomain() }
 
+    /** Lookup by primary key, returning null if the row was deleted in flight. */
     open suspend fun getById(id: Long): MedicationReminder? =
         reminderDao.getById(id)?.toDomain()
 
+    /**
+     * Insert (id == 0) or update (id != 0) a reminder. Returns the
+     * resulting row id so the editor can navigate back with a stable
+     * handle. Note that REPLACE on the underlying DAO would also work
+     * for updates but we go through `update` to preserve the existing
+     * id rather than re-insert with a fresh one.
+     */
     open suspend fun upsert(reminder: MedicationReminder): Long {
         val entity = reminder.toEntity()
         return if (reminder.id == 0L) reminderDao.insert(entity)
@@ -104,14 +114,21 @@ open class MedicationRepository(
         }
     }
 
+    /** Hard-delete a reminder. The FK cascade purges its dose history simultaneously. */
     open suspend fun delete(id: Long) = reminderDao.delete(id)
 
+    /** Toggle enabled state without rewriting any other field. No-op if id missing. */
     open suspend fun setEnabled(id: Long, enabled: Boolean) {
         val current = reminderDao.getById(id) ?: return
         reminderDao.update(current.copy(enabled = enabled))
     }
 
-    /** Appends a new `PENDING` row for the moment a reminder fires. */
+    /**
+     * Appends a new `PENDING` row for the moment a reminder fires. The
+     * returned row id is embedded in the notification's action intents so
+     * a subsequent Taken / Snooze tap can update the exact event without
+     * re-querying for "the latest PENDING for this medication".
+     */
     open suspend fun recordFired(medicationId: Long, scheduledAt: Long, firedAt: Long): Long {
         return doseEventDao.insert(
             DoseEventEntity(
@@ -123,10 +140,12 @@ open class MedicationRepository(
         )
     }
 
+    /** Flip a PENDING dose row to TAKEN. Called from the notification action receiver. */
     open suspend fun markTaken(eventId: Long, actedAt: Long) {
         doseEventDao.updateStatus(eventId, DoseStatus.Taken.storageKey, actedAt)
     }
 
+    /** Flip a PENDING dose row to SNOOZED. The scheduler arms a fresh alarm separately. */
     open suspend fun markSnoozed(eventId: Long, actedAt: Long) {
         doseEventDao.updateStatus(eventId, DoseStatus.Snoozed.storageKey, actedAt)
     }
@@ -139,6 +158,11 @@ open class MedicationRepository(
     open fun observeEventsSince(windowMillis: Long, now: Long): Flow<List<DoseEvent>> =
         doseEventDao.observeSince(now - windowMillis).map { list -> list.map { it.toDomain(now) } }
 
+    /**
+     * Prune dose events older than [cutoffEpochMillis] (ms since epoch).
+     * Returns the number of rows deleted so the caller can log a metric.
+     * Wired into the cold-start retention sweep — see [HISTORY_RETENTION_MILLIS].
+     */
     open suspend fun pruneOlderThan(cutoffEpochMillis: Long): Int =
         doseEventDao.deleteOlderThan(cutoffEpochMillis)
 }

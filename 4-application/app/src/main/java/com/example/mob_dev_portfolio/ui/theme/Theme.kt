@@ -10,6 +10,15 @@ import androidx.compose.runtime.Composable
 import androidx.compose.ui.platform.LocalContext
 import com.example.mob_dev_portfolio.data.preferences.ThemeMode
 
+// ──────────────────────────────────────────────────────────────────────
+// Material 3 ColorScheme bindings.
+//
+// Each scheme maps the Aura tokens declared in `Color.kt` onto the M3
+// colour roles. Building the schemes once at file-scope (rather than on
+// every recomposition) keeps theme switches cheap — the Composable below
+// just selects which preconstructed scheme to hand to `MaterialTheme`.
+// ──────────────────────────────────────────────────────────────────────
+
 private val LightScheme = lightColorScheme(
     primary = AuraPrimary,
     onPrimary = AuraOnPrimary,

@@ -48,6 +48,21 @@ data class UserProfile(
     val biologicalSex: BiologicalSex? = null,
 )
 
+/**
+ * DataStore-backed repository for the user's self-reported profile
+ * (full name, date of birth, biological sex).
+ *
+ * Stored in the **unencrypted** Preferences DataStore. The threat model
+ * here is intentional: full name and DOB are not transmitted in raw form
+ * — `AnalysisSanitizer` redacts the name and converts DOB to a coarse
+ * age bucket before any Gemini call — and the Preferences file is
+ * already inside per-user FBE on Android 7+. Promoting these fields
+ * into the encrypted Room database would force opening SQLCipher just
+ * to render the Settings header, which lengthens cold start for no
+ * additional protection.
+ *
+ * `open` for test-double purposes — see [UiPreferencesRepository] KDoc.
+ */
 open class UserProfileRepository(
     private val dataStore: DataStore<Preferences>,
 ) {

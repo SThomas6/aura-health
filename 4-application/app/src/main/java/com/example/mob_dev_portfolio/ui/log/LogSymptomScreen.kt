@@ -85,7 +85,6 @@ import androidx.lifecycle.viewmodel.compose.viewModel
 import com.example.mob_dev_portfolio.AuraApplication
 import com.example.mob_dev_portfolio.data.ContextTagCatalog
 import com.example.mob_dev_portfolio.data.SymptomCatalog
-import com.example.mob_dev_portfolio.data.doctor.DoctorDiagnosis
 import com.example.mob_dev_portfolio.data.photo.SymptomPhotoRepository
 import java.io.File
 import java.time.Instant
@@ -118,6 +117,31 @@ private fun createCameraTempUri(context: Context): Uri {
     return FileProvider.getUriForFile(context, authority, file)
 }
 
+/**
+ * Symptom Editor screen — the "create / edit a log" form.
+ *
+ * Hosts the full symptom-logging form (name, description, start/end
+ * times, severity slider, medication, context tags, photos, location
+ * opt-in, environment capture). Used in two modes via the two factories
+ * on [LogSymptomViewModel]:
+ *
+ *   * Create mode (default `Factory`) — empty draft, fresh `now` start.
+ *   * Edit mode (`editFactory(id)`) — hydrates from an existing log row.
+ *
+ * Activity-result launchers (camera, gallery, location/CAMERA permission
+ * prompts) live in this composable rather than the VM because they need
+ * a `LocalContext` and a `rememberLauncherForActivityResult` host. The
+ * VM exposes one-shot signals (`shouldRequestLocationPermission`,
+ * `savedConfirmation`, `transientError`) that this composable reacts to
+ * via `LaunchedEffect` so the launcher firing remains driven by state
+ * rather than imperative VM calls.
+ *
+ * Particular care is taken around the biometric-lock session: every time
+ * we deliberately leave the app to a sibling activity (camera / gallery)
+ * we suppress the next relock so the user isn't kicked back to the lock
+ * screen on return — and so the composition (including the
+ * `pendingCameraUri`) survives.
+ */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun LogSymptomScreen(
@@ -126,8 +150,7 @@ fun LogSymptomScreen(
     viewModel: LogSymptomViewModel = viewModel(factory = LogSymptomViewModel.Factory),
 ) {
     val uiState by viewModel.state.collectAsStateWithLifecycle()
-    val diagnoses by viewModel.diagnoses.collectAsStateWithLifecycle()
-    val healthConditions by viewModel.healthConditions.collectAsStateWithLifecycle()
+    val groupings by viewModel.groupings.collectAsStateWithLifecycle()
     val snackbarHost = remember { SnackbarHostState() }
     val context = LocalContext.current
 
@@ -405,29 +428,16 @@ fun LogSymptomScreen(
                 minLines = 3,
             )
 
-            if (diagnoses.isNotEmpty()) {
+            if (groupings.isNotEmpty()) {
                 HorizontalDivider()
                 SectionHeader(
-                    "Link to diagnosis",
-                    "Tag this log to a doctor-confirmed diagnosis from a visit (optional).",
+                    "Group under condition",
+                    "Pin this log to one of your conditions or doctor diagnoses (optional).",
                 )
-                DiagnosisPicker(
-                    diagnoses = diagnoses,
-                    selectedId = uiState.selectedDiagnosisId,
-                    onSelect = viewModel::onSelectDiagnosis,
-                )
-            }
-
-            if (healthConditions.isNotEmpty()) {
-                HorizontalDivider()
-                SectionHeader(
-                    "Group under a condition",
-                    "Pin this log to one of your standing health conditions so it shows up grouped on the Symptoms list (optional).",
-                )
-                HealthConditionPicker(
-                    conditions = healthConditions,
-                    selectedId = uiState.selectedConditionId,
-                    onSelect = viewModel::onSelectCondition,
+                GroupingPicker(
+                    groupings = groupings,
+                    selectedId = uiState.selectedGroupingId,
+                    onSelect = viewModel::onSelectGrouping,
                 )
             }
 

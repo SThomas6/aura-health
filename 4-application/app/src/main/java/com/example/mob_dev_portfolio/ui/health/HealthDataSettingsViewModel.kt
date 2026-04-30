@@ -107,12 +107,38 @@ class HealthDataSettingsViewModel(
         }
     }
 
+    /**
+     * Master AI-inclusion toggle — independent of the connection state so
+     * the user can keep the dashboard charts visible while opting out of
+     * having their readings included in the analysis prompt.
+     */
     fun setIntegrationEnabled(enabled: Boolean) {
         viewModelScope.launch { preferencesRepository.setIntegrationEnabled(enabled) }
     }
 
+    /**
+     * Per-metric toggle. The screen pairs an "enabled but not granted"
+     * row with an inline Grant CTA, so flipping this on without a grant
+     * is a valid intermediate state — the row chrome just nudges the
+     * user toward the permission request.
+     */
     fun setMetricEnabled(metric: HealthConnectMetric, enabled: Boolean) {
         viewModelScope.launch { preferencesRepository.setEnabled(metric, enabled) }
+    }
+
+    /**
+     * Bulk-toggle every catalogue metric. Used by the screen's
+     * "Select all" / "Deselect all" affordance so the user doesn't have
+     * to flip 12 switches individually. Permission requests for any
+     * not-yet-granted metrics are kicked off by the screen — the VM only
+     * owns the preference state, not the launcher.
+     */
+    fun setAllMetricsEnabled(enabled: Boolean) {
+        viewModelScope.launch {
+            HealthConnectMetric.entries.forEach { metric ->
+                preferencesRepository.setEnabled(metric, enabled)
+            }
+        }
     }
 
     /**
@@ -194,6 +220,7 @@ class HealthDataSettingsViewModel(
         }
     }
 
+    /** Clears the snackbar one-shot once the host has displayed the message. */
     fun dismissMessage() {
         transientMessageFlow.value = null
     }

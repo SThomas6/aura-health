@@ -33,6 +33,16 @@ data class DemographicProfileUiState(
     val ageRangePreview: String = AnalysisSanitizer.UNKNOWN_AGE_RANGE,
 )
 
+/**
+ * ViewModel for the demographic profile editor.
+ *
+ * The screen exists to give the user a single, transparent place to
+ * inspect / change the data that gets bucketised into the coarse
+ * [AnalysisSanitizer] inputs. Persistence is fire-and-forget on each
+ * field change rather than gated behind a Save button — the values are
+ * single-field and the user expects them to stick the moment they
+ * change, the same way they would on the system Settings app.
+ */
 class DemographicProfileViewModel(
     private val repository: UserProfileRepository,
     private val nowProvider: () -> Long = { System.currentTimeMillis() },

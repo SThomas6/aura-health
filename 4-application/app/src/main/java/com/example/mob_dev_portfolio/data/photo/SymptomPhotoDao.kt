@@ -6,9 +6,19 @@ import androidx.room.OnConflictStrategy
 import androidx.room.Query
 import kotlinx.coroutines.flow.Flow
 
+/**
+ * Room DAO over the photo-attachment table.
+ *
+ * Insert uses [OnConflictStrategy.ABORT] (rather than REPLACE) because
+ * a primary-key collision would indicate a programming error — every
+ * insert here originates from a fresh `autoGenerate` id. We'd rather
+ * surface that bug as a SQLiteConstraintException than silently
+ * overwrite an existing row and orphan its on-disk encrypted file.
+ */
 @Dao
 interface SymptomPhotoDao {
 
+    /** Insert a freshly-captured photo row. Aborts on PK collision (see DAO KDoc). */
     @Insert(onConflict = OnConflictStrategy.ABORT)
     suspend fun insert(entity: SymptomPhotoEntity): Long
 
@@ -39,12 +49,19 @@ interface SymptomPhotoDao {
     @Query("SELECT COUNT(*) FROM symptom_photos WHERE symptomLogId = :logId")
     suspend fun countForLog(logId: Long): Int
 
+    /** Lookup-by-id used before an unlink so the repository can resolve the file path. */
     @Query("SELECT * FROM symptom_photos WHERE id = :id LIMIT 1")
     suspend fun getById(id: Long): SymptomPhotoEntity?
 
+    /** Delete a single photo row. The repository deletes the on-disk blob first. */
     @Query("DELETE FROM symptom_photos WHERE id = :id")
     suspend fun delete(id: Long)
 
+    /**
+     * Delete every photo row for a log. Called by the repository in
+     * tandem with file-system unlinks; the FK cascade on the parent
+     * is the safety-net for callers that delete logs directly.
+     */
     @Query("DELETE FROM symptom_photos WHERE symptomLogId = :logId")
     suspend fun deleteForLog(logId: Long)
 }

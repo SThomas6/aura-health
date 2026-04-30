@@ -26,7 +26,19 @@ import kotlinx.coroutines.flow.Flow
  *      KEEP so double-taps ignore rather than replace) touches one file.
  */
 interface AnalysisScheduler {
+    /**
+     * Enqueue a one-shot analysis run, replacing any in-flight run with
+     * a fresh one (so a re-tap with edited [userContext] supersedes the
+     * stale request). The worker requires connectivity — if the device
+     * is offline at enqueue, WorkManager defers until network returns.
+     */
     fun enqueue(userContext: String)
+
+    /**
+     * Hot stream of WorkInfos for the unique one-shot analysis chain.
+     * The ViewModel observes this to drive the on-screen progress / done
+     * state without polling.
+     */
     fun currentWorkInfos(): Flow<List<WorkInfo>>
 
     /**
@@ -44,6 +56,13 @@ interface AnalysisScheduler {
     fun scheduleWeekly()
 }
 
+/**
+ * Production [AnalysisScheduler] backed by the real [WorkManager]
+ * singleton. The class is deliberately stateless beyond the injected
+ * `workManager` — every call is a thin wrapper around a WorkManager
+ * primitive so the only thing tests need to fake is `WorkManager`
+ * itself, not this class.
+ */
 class WorkManagerAnalysisScheduler(
     private val workManager: WorkManager,
 ) : AnalysisScheduler {

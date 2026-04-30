@@ -7,15 +7,37 @@ import androidx.room.Query
 import androidx.room.Update
 import kotlinx.coroutines.flow.Flow
 
+/**
+ * Room DAO for the `symptom_logs` table — the heart of the app's local
+ * storage. Mixes [Flow]-returning observers (for reactive UI binding via
+ * `collectAsStateWithLifecycle`) with `suspend` one-shot reads (for the
+ * report builder and aggregate queries).
+ *
+ * The filtering query is intentionally pushed all the way down to SQL
+ * rather than re-implemented in Kotlin: it ensures the History screen
+ * remains responsive once the table holds thousands of rows, and it
+ * means the partial-text match runs in SQLite's optimised LIKE rather
+ * than a JVM regex.
+ */
 @Dao
 interface SymptomLogDao {
 
+    /**
+     * REPLACE conflict strategy: the editor reuses the row's id on
+     * edit, so an `insert` of an existing id atomically overwrites.
+     * Returns the new (or replaced) row id so callers can navigate to
+     * it without a follow-up select.
+     */
     @Insert(onConflict = OnConflictStrategy.REPLACE)
     suspend fun insert(entity: SymptomLogEntity): Long
 
     @Update
     suspend fun update(entity: SymptomLogEntity): Int
 
+    /**
+     * Reactive descending-by-start-time stream. Drives any screen that
+     * doesn't need filtering — primarily the Home dashboard preview.
+     */
     @Query("SELECT * FROM symptom_logs ORDER BY startEpochMillis DESC")
     fun observeAll(): Flow<List<SymptomLogEntity>>
 
@@ -47,6 +69,14 @@ interface SymptomLogDao {
             COALESCE(endEpochMillis, startEpochMillis) DESC
         """,
     )
+    /**
+     * Drives the filtered History screen. Each parameter is nullable
+     * (or has a sentinel) to support "filter unset" without a separate
+     * query per axis. The `:sortKey` string maps onto a CASE/WHEN
+     * cascade above so a single prepared statement can serve every
+     * sort the UI exposes — adding a new sort means adding a new
+     * CASE arm here, not a new method.
+     */
     fun observeFiltered(
         query: String?,
         minSeverity: Int,
@@ -56,9 +86,11 @@ interface SymptomLogDao {
         sortKey: String,
     ): Flow<List<SymptomLogEntity>>
 
+    /** Single-row reactive read. Emits `null` when the row is deleted. */
     @Query("SELECT * FROM symptom_logs WHERE id = :id LIMIT 1")
     fun observeById(id: Long): Flow<SymptomLogEntity?>
 
+    /** Drives the home dashboard's "logs to date" stat. */
     @Query("SELECT COUNT(*) FROM symptom_logs")
     fun observeCount(): Flow<Int>
 

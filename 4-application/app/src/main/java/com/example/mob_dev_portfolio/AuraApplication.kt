@@ -11,6 +11,18 @@ import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.runBlocking
 
+/**
+ * Process-level entry point. Owns the [AppContainer] (our hand-rolled
+ * DI graph) and runs the small set of one-shot tasks that can't wait
+ * for a feature to lazily construct itself: load the SQLCipher native
+ * library, apply the persisted theme so the splash uses the correct
+ * night-mode resources, schedule the recurring AI analysis worker,
+ * re-arm medication alarms after task-kill, and seed demo data on the
+ * `demo` flavor.
+ *
+ * Anything that can be deferred to first feature use lives behind a
+ * `by lazy` in [DefaultAppContainer] so cold-start stays fast.
+ */
 class AuraApplication : Application() {
     lateinit var container: AppContainer
         private set
@@ -28,6 +40,20 @@ class AuraApplication : Application() {
         super.onCreate()
         System.loadLibrary("sqlcipher")
         container = DefaultAppContainer(this)
+
+        // Pre-warm the encrypted database on the IO scope so the
+        // runBlocking inside the lazy `database` getter (passphrase
+        // unwrap from Keystore + DataStore read + SQLCipher open)
+        // executes here, not on whichever thread first touches the
+        // container. Without this, an unlucky call from the main
+        // thread before any background scope has fired the getter
+        // could stall the UI through that runBlocking. Idempotent —
+        // the getter is `by lazy`, so subsequent accesses from
+        // anywhere are instant.
+        startupScope.launch {
+            runCatching { container.symptomLogRepository }
+                .onFailure { Log.w("AuraApplication", "Database pre-warm failed", it) }
+        }
 
         // Apply the user's persisted theme preference to AppCompat's
         // global night-mode flag. AppCompat persists the value via its
@@ -68,17 +94,22 @@ class AuraApplication : Application() {
         // experience. The flag is set via BuildConfig from the flavor
         // block in app/build.gradle.
         //
-        // Order matters: the doctor seeder links visits to symptom logs
-        // by id, so the symptom seed has to land first. We run them
-        // sequentially in a single coroutine rather than two parallel
-        // launches to avoid the doctor seeder racing the symptom seed
-        // and bailing out as "no logs yet".
+        // Order matters: the doctor and condition seeders link to
+        // symptom logs by id, so the symptom seed has to land first.
+        // Conditions run after diagnoses so the condition seeder can
+        // skip headache logs already attached to the tension-headache
+        // diagnosis (the editor will eventually treat both as one
+        // mutually-exclusive picker; staying disjoint now avoids a
+        // mess later). We run them sequentially in a single coroutine
+        // so each seeder sees the previous one's writes.
         if (BuildConfig.SEED_SAMPLE_DATA) {
             startupScope.launch {
                 runCatching { container.symptomLogSeeder.seedIfEmpty() }
                     .onFailure { Log.w("AuraApplication", "Symptom seed failed", it) }
                 runCatching { container.doctorVisitSeeder.seedIfEmpty() }
                     .onFailure { Log.w("AuraApplication", "Doctor visit seed failed", it) }
+                runCatching { container.healthConditionSeeder.seedIfEmpty() }
+                    .onFailure { Log.w("AuraApplication", "Health condition seed failed", it) }
             }
         }
 

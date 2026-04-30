@@ -7,6 +7,17 @@ import androidx.room.Query
 import androidx.room.Update
 import kotlinx.coroutines.flow.Flow
 
+/**
+ * Room access for the doctor-visit half of the Doctor Visits feature.
+ * Owns the `doctor_visits` parent table and the `doctor_visit_covered_logs`
+ * join — the latter is the source of truth for which symptom logs the
+ * AI sanitiser must drop ("the doctor cleared this, leave it alone").
+ *
+ * Diagnoses live in the sibling [DoctorDiagnosisDao] but cascade off
+ * the visit row via foreign key, so deleting a visit also wipes its
+ * diagnoses and the cleared-log links — the only deletion surface a
+ * caller needs.
+ */
 @Dao
 interface DoctorVisitDao {
 

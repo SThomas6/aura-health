@@ -80,6 +80,21 @@ import java.util.Locale
 // already exists on `SymptomLog` and `HomeInsights` — no backend changes.
 // ──────────────────────────────────────────────────────────────────────
 
+/**
+ * Home dashboard composable — the app's launch surface.
+ *
+ * Composes a column of independent cards (greeting, hero CTA, insights,
+ * trends preview, health dashboard, recent activity, secondary CTAs)
+ * driven by the small [HomeViewModel] state surface. Every navigation
+ * affordance is a separate callback parameter rather than a single
+ * "navigate" lambda, so the parent NavHost can wire each tile to the
+ * exact destination/back-stack handling it needs.
+ *
+ * Cards re-use the same Compose subcomponents in the trends and health
+ * directories — this composable is deliberately a thin orchestrator so
+ * shared visual elements stay testable in isolation and the home layout
+ * isn't fighting their internal state.
+ */
 @Composable
 fun HomeScreen(
     onLogSymptomClick: () -> Unit,

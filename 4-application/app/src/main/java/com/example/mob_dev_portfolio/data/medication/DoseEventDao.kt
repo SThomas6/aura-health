@@ -5,9 +5,20 @@ import androidx.room.Insert
 import androidx.room.Query
 import kotlinx.coroutines.flow.Flow
 
+/**
+ * Room DAO over the dose-event log (one row per fired reminder + the
+ * user's eventual response).
+ *
+ * The two `observeSince` flows are deliberately partial — most history
+ * UI only ever wants the last 30 days (FR-MR-06), and pulling everything
+ * just to filter client-side would scale poorly as the table grows. The
+ * `sinceEpochMillis` cutoff matches the retention floor enforced by
+ * [deleteOlderThan].
+ */
 @Dao
 interface DoseEventDao {
 
+    /** Insert a freshly-fired reminder row (status = `PENDING`); returns the new row id. */
     @Insert
     suspend fun insert(event: DoseEventEntity): Long
 

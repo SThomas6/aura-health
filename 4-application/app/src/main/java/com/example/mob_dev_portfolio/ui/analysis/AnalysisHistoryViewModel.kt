@@ -38,6 +38,11 @@ class AnalysisHistoryViewModel(
         )
 
     companion object {
+        /**
+         * App-wide singleton factory. The VM has no per-instance args so
+         * a single shared factory keeps allocations down — `viewModel()`
+         * caches the instance against the back-stack entry anyway.
+         */
         val Factory: ViewModelProvider.Factory = object : ViewModelProvider.Factory {
             @Suppress("UNCHECKED_CAST")
             override fun <T : ViewModel> create(modelClass: Class<T>, extras: CreationExtras): T {

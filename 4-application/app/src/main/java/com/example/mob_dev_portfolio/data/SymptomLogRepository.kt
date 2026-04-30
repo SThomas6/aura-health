@@ -10,6 +10,22 @@ import kotlinx.serialization.builtins.ListSerializer
 import kotlinx.serialization.builtins.serializer
 import kotlinx.serialization.json.Json
 
+/**
+ * Domain-facing wrapper around [SymptomLogDao]. Keeps the Room entity
+ * type behind the data layer boundary so view-models work with the
+ * cleaner [SymptomLog] data class — the entity-to-domain mapping is
+ * the only place context-tag deserialisation lives.
+ *
+ * The class is `open` (and the methods are `open`) so view-model unit
+ * tests can subclass with a fake without needing an interface. The
+ * production app injects a single instance via [com.example.mob_dev_portfolio.AppContainer].
+ *
+ * History filtering is partly DAO and partly in-memory: the SQL query
+ * handles severity range, date window, free-text LIKE, and sort, but
+ * tag filtering is applied here on the materialised list because Room
+ * cannot trivially express "row's serialised tag string contains every
+ * one of N tags".
+ */
 open class SymptomLogRepository(
     private val dao: SymptomLogDao,
     /**
@@ -77,6 +93,11 @@ private val HistorySort.daoKey: String
         HistorySort.NameAsc -> "NAME_ASC"
     }
 
+/**
+ * Domain twin of [SymptomLogEntity]. Holds [contextTags] as a real
+ * `List<String>` (already deserialised) so view-models and the UI
+ * never touch the on-disk encoding.
+ */
 data class SymptomLog(
     val id: Long = 0L,
     val symptomName: String,

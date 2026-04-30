@@ -43,6 +43,12 @@ class HealthMetricDetailViewModel(
         reload(_state.value.range)
     }
 
+    /**
+     * Switches the time-range window. No-op when the range is unchanged
+     * to avoid kicking off a redundant Health Connect read on a recompose
+     * that happens to fire the segmented button's `onClick` for the
+     * already-selected option.
+     */
     fun setRange(range: HealthHistoryRepository.Range) {
         if (_state.value.range == range) return
         _state.value = _state.value.copy(range = range, loading = true)

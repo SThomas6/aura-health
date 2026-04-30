@@ -6,6 +6,7 @@ import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.ExposedDropdownMenuAnchorType
 import androidx.compose.material3.ExposedDropdownMenuBox
 import androidx.compose.material3.ExposedDropdownMenuDefaults
+import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
@@ -20,95 +21,102 @@ import com.example.mob_dev_portfolio.data.condition.HealthCondition
 import com.example.mob_dev_portfolio.data.doctor.DoctorDiagnosis
 
 /**
- * Two thin presentational dropdown pickers split out from
- * [LogSymptomScreen] to keep the screen file under control. They have
- * no Flow / VM dependencies — purely "given a list and a selection,
- * render an exposed dropdown" composables.
+ * Unified picker for the symptom editor's "Group under condition" field.
  *
- * Kept in the same package as the screen (`ui.log`) and marked
- * `internal` so the screen can keep referring to them by short name
- * without exposing them more broadly.
+ * Originally we had two separate pickers — one for doctor-confirmed
+ * diagnoses, one for user-declared health conditions — because the
+ * underlying domain models live in different packages. Users found the
+ * pair confusing: from their perspective both fields ask the same
+ * question ("which of my standing health things does this log belong
+ * to?"), even though the underlying data is sourced differently.
+ *
+ * The two are merged into a single dropdown here. The schema-level
+ * distinction is preserved (each entry carries its origin) so the
+ * AI pipeline can still annotate logs with the more specific
+ * "doctor-confirmed diagnosis" semantic where applicable, but the
+ * editor never asks the user to pick between two near-identical fields.
  */
 
 /**
- * Picker that lets the user link a symptom log to one of the
- * doctor-confirmed diagnoses they've recorded. "None" leaves the log
- * un-linked. Used by the Symptom Editor form when there's at least
- * one diagnosis on file.
+ * Sealed unified-grouping model surfaced to the editor. Each arm
+ * carries enough metadata for the picker to render itself (label) and
+ * for the save path to resolve back to the right repository call.
+ *
+ * The composite [id] is stable across recompositions and unique across
+ * the diagnosis/condition union, so it can drive a single
+ * `selectedGroupingId: String?` field on the editor's UI state without
+ * the schema-level `Long` ids of the two underlying tables ever
+ * colliding.
  */
-@OptIn(ExperimentalMaterial3Api::class)
-@Composable
-internal fun DiagnosisPicker(
-    diagnoses: List<DoctorDiagnosis>,
-    selectedId: Long?,
-    onSelect: (Long?) -> Unit,
-) {
-    var expanded by rememberSaveable { mutableStateOf(false) }
-    val selectedLabel = remember(selectedId, diagnoses) {
-        diagnoses.firstOrNull { it.id == selectedId }?.label
+sealed interface LogGrouping {
+    /** Stable composite id ("diag:<dbId>" or "cond:<dbId>"). */
+    val id: String
+    /** What the user sees in the dropdown. */
+    val displayName: String
+
+    data class Diagnosis(
+        val diagnosisId: Long,
+        val label: String,
+    ) : LogGrouping {
+        override val id: String = "diag:$diagnosisId"
+        override val displayName: String = label.ifBlank { "(unlabelled issue)" }
     }
 
-    ExposedDropdownMenuBox(
-        expanded = expanded,
-        onExpandedChange = { expanded = it },
-    ) {
-        OutlinedTextField(
-            value = selectedLabel?.ifBlank { "(unlabelled issue)" } ?: "None",
-            onValueChange = {},
-            readOnly = true,
-            label = { Text("Diagnosis link") },
-            trailingIcon = { ExposedDropdownMenuDefaults.TrailingIcon(expanded = expanded) },
-            modifier = Modifier
-                .menuAnchor(ExposedDropdownMenuAnchorType.PrimaryNotEditable, enabled = true)
-                .fillMaxWidth()
-                .testTag("field_diagnosis_link"),
-        )
-        ExposedDropdownMenu(
-            expanded = expanded,
-            onDismissRequest = { expanded = false },
-        ) {
-            DropdownMenuItem(
-                text = { Text("None") },
-                onClick = {
-                    expanded = false
-                    onSelect(null)
-                },
-                modifier = Modifier.testTag("diagnosis_option_none"),
-            )
-            diagnoses.forEach { diagnosis ->
-                DropdownMenuItem(
-                    text = { Text(diagnosis.label.ifBlank { "(unlabelled issue)" }) },
-                    onClick = {
-                        expanded = false
-                        onSelect(diagnosis.id)
-                    },
-                    modifier = Modifier.testTag("diagnosis_option_${diagnosis.id}"),
-                )
-            }
+    data class Condition(
+        val conditionId: Long,
+        val name: String,
+    ) : LogGrouping {
+        override val id: String = "cond:$conditionId"
+        override val displayName: String = name
+    }
+
+    companion object {
+        /** Compose the merged picker list — conditions first, then diagnoses. */
+        fun build(
+            conditions: List<HealthCondition>,
+            diagnoses: List<DoctorDiagnosis>,
+        ): List<LogGrouping> = buildList {
+            conditions.forEach { add(Condition(conditionId = it.id, name = it.name)) }
+            diagnoses.forEach { add(Diagnosis(diagnosisId = it.id, label = it.label)) }
         }
+
+        /** Resolve a picker id back to the source diagnosis db id, if any. */
+        fun diagnosisIdFor(groupingId: String?): Long? =
+            groupingId?.takeIf { it.startsWith("diag:") }
+                ?.substringAfter("diag:")
+                ?.toLongOrNull()
+
+        /** Resolve a picker id back to the source condition db id, if any. */
+        fun conditionIdFor(groupingId: String?): Long? =
+            groupingId?.takeIf { it.startsWith("cond:") }
+                ?.substringAfter("cond:")
+                ?.toLongOrNull()
     }
 }
 
 /**
- * Mirror of [DiagnosisPicker] for user-declared health conditions —
- * chronic / pre-existing issues like "Type 2 Diabetes" the user added
- * during onboarding or via the Conditions settings screen.
+ * Single dropdown that reads from the merged [LogGrouping] list.
  *
- * Two separate composables (rather than a generic one) because the
- * domain models live in different modules and the test tags differ —
- * keeping them parallel makes the rendering trivial to read.
+ * Renders one section per origin (Conditions, then Diagnoses), each
+ * with a sub-header, separated by a divider — close enough to "one
+ * picker" for the user to forget the data lives in two tables, but
+ * preserving enough visual cue that someone scanning the list still
+ * sees which entries are doctor-verified.
  */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-internal fun HealthConditionPicker(
-    conditions: List<HealthCondition>,
-    selectedId: Long?,
-    onSelect: (Long?) -> Unit,
+internal fun GroupingPicker(
+    groupings: List<LogGrouping>,
+    selectedId: String?,
+    onSelect: (String?) -> Unit,
 ) {
     var expanded by rememberSaveable { mutableStateOf(false) }
-    val selectedLabel = remember(selectedId, conditions) {
-        conditions.firstOrNull { it.id == selectedId }?.name
+    val selectedLabel = remember(selectedId, groupings) {
+        groupings.firstOrNull { it.id == selectedId }?.displayName
     }
+
+    val conditions = groupings.filterIsInstance<LogGrouping.Condition>()
+    val diagnoses = groupings.filterIsInstance<LogGrouping.Diagnosis>()
 
     ExposedDropdownMenuBox(
         expanded = expanded,
@@ -118,12 +126,12 @@ internal fun HealthConditionPicker(
             value = selectedLabel ?: "None",
             onValueChange = {},
             readOnly = true,
-            label = { Text("Health condition") },
+            label = { Text("Condition") },
             trailingIcon = { ExposedDropdownMenuDefaults.TrailingIcon(expanded = expanded) },
             modifier = Modifier
                 .menuAnchor(ExposedDropdownMenuAnchorType.PrimaryNotEditable, enabled = true)
                 .fillMaxWidth()
-                .testTag("field_condition_link"),
+                .testTag("field_grouping_link"),
         )
         ExposedDropdownMenu(
             expanded = expanded,
@@ -135,18 +143,68 @@ internal fun HealthConditionPicker(
                     expanded = false
                     onSelect(null)
                 },
-                modifier = Modifier.testTag("condition_option_none"),
+                modifier = Modifier.testTag("grouping_option_none"),
             )
-            conditions.forEach { condition ->
-                DropdownMenuItem(
-                    text = { Text(condition.name) },
-                    onClick = {
-                        expanded = false
-                        onSelect(condition.id)
-                    },
-                    modifier = Modifier.testTag("condition_option_${condition.id}"),
-                )
+
+            // Conditions section — the user-declared, standing facts.
+            // Rendered first because it's where the average user is
+            // likeliest to find a match (every onboarded user has at
+            // least one).
+            if (conditions.isNotEmpty()) {
+                HorizontalDivider()
+                SectionLabelItem(label = "Conditions")
+                conditions.forEach { item ->
+                    DropdownMenuItem(
+                        text = { Text(item.displayName) },
+                        onClick = {
+                            expanded = false
+                            onSelect(item.id)
+                        },
+                        modifier = Modifier.testTag("grouping_option_${item.id}"),
+                    )
+                }
+            }
+
+            // Diagnoses section — doctor-confirmed, scoped to a visit.
+            // Sub-headed separately so the user still sees that these
+            // entries carry stronger provenance than self-declared
+            // conditions.
+            if (diagnoses.isNotEmpty()) {
+                HorizontalDivider()
+                SectionLabelItem(label = "Doctor diagnoses")
+                diagnoses.forEach { item ->
+                    DropdownMenuItem(
+                        text = { Text(item.displayName) },
+                        onClick = {
+                            expanded = false
+                            onSelect(item.id)
+                        },
+                        modifier = Modifier.testTag("grouping_option_${item.id}"),
+                    )
+                }
             }
         }
     }
+}
+
+/**
+ * Disabled, label-styled dropdown row used as a section sub-header
+ * inside [GroupingPicker]. Compose's M3 dropdown doesn't ship a
+ * dedicated header item, so we render a plain disabled menu item —
+ * keyboard / accessibility tree treats it as non-interactive without
+ * pulling in extra widget machinery.
+ */
+@Composable
+private fun SectionLabelItem(label: String) {
+    DropdownMenuItem(
+        text = {
+            Text(
+                text = label.uppercase(),
+                style = androidx.compose.material3.MaterialTheme.typography.labelSmall,
+                color = androidx.compose.material3.MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+        },
+        onClick = {},
+        enabled = false,
+    )
 }

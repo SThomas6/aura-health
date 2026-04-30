@@ -11,6 +11,7 @@ import kotlinx.coroutines.flow.map
 
 // ── Domain models ──────────────────────────────────────────────────────
 
+/** UI-facing twin of [DoctorVisitEntity]. Keeps Room types out of view-models. */
 data class DoctorVisit(
     val id: Long,
     val doctorName: String,
@@ -19,6 +20,11 @@ data class DoctorVisit(
     val createdAtEpochMillis: Long,
 )
 
+/**
+ * UI-facing twin of [DoctorDiagnosisEntity], with [linkedLogIds]
+ * pre-resolved so the detail screen can render the linked-symptom rows
+ * without a follow-up query per diagnosis.
+ */
 data class DoctorDiagnosis(
     val id: Long,
     val visitId: Long,
@@ -94,6 +100,22 @@ data class DoctorContextSnapshot(
 
 // ── Repository ─────────────────────────────────────────────────────────
 
+/**
+ * Coordinates writes across the four tables that make up the Doctor
+ * Visits feature: `doctor_visits`, `doctor_visit_covered_logs`,
+ * `doctor_diagnoses`, and `doctor_diagnosis_logs`. The repository's job
+ * is to keep those tables consistent — every multi-table mutation
+ * (saving a visit, attaching a log to a diagnosis) runs inside a
+ * `withTransaction` block so a crash mid-write can never leave a
+ * dangling join row.
+ *
+ * Reads are split between live `Flow`s (for the live UI screens) and
+ * one-shot suspending snapshots (for the background AI worker, which
+ * needs a stable view for the duration of a single run).
+ *
+ * `open` so unit tests can subclass with a fake without going through
+ * Room.
+ */
 open class DoctorVisitRepository(
     private val database: AuraDatabase,
     private val visitDao: DoctorVisitDao,

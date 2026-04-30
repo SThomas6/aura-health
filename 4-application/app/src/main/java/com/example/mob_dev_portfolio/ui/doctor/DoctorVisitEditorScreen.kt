@@ -60,6 +60,27 @@ import java.time.Instant
 import java.time.ZoneId
 import java.time.format.DateTimeFormatter
 
+/**
+ * Add/edit form for a doctor visit.
+ *
+ * Captures three logical buckets in one screen:
+ *   1. Visit metadata — doctor's name, date, and free-text summary.
+ *   2. "Cleared" symptom logs — explicitly reviewed and dismissed by the
+ *      clinician. Stored as a flat id set on the visit; the AI ignores
+ *      these completely on subsequent analysis runs.
+ *   3. One or more diagnoses, each with its own label, notes, and
+ *      linked-log set. Linked logs are treated by the AI as
+ *      already-explained context rather than fresh complaints.
+ *
+ * The cleared/linked sets share a single underlying log list, but a
+ * given log can only belong to one bucket at a time within the form —
+ * the toggle handlers in [DoctorVisitEditorViewModel] enforce that
+ * invariant so the user doesn't end up with conflicting selections.
+ *
+ * A null [visitId] means "new visit"; a non-null id loads the existing
+ * row for editing. The screen pops via [onSaved] once the repository
+ * write succeeds.
+ */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun DoctorVisitEditorScreen(
@@ -518,6 +539,12 @@ private fun SelectableLogRow(
     }
 }
 
+/**
+ * Discriminator for the picker bottom-sheet — tells [LogPickerSheet]
+ * whether the toggled-log id should land in the "cleared" set or in a
+ * specific diagnosis row's `linkedLogIds`. Sealed so the screen-level
+ * `when` is exhaustive.
+ */
 private sealed interface LogPickerTarget {
     data object Cleared : LogPickerTarget
     data class Diagnosis(val rowKey: Long) : LogPickerTarget

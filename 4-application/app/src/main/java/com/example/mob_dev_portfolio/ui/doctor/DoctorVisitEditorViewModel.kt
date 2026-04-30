@@ -130,14 +130,17 @@ class DoctorVisitEditorViewModel(
         }
     }
 
+    /** Updates the doctor-name field and clears any previous save-error banner. */
     fun updateDoctorName(value: String) {
         _state.value = _state.value.copy(doctorName = value, error = null)
     }
 
+    /** Updates the visit date — set from the DatePickerDialog. */
     fun updateVisitDate(epochMillis: Long) {
         _state.value = _state.value.copy(visitDateEpochMillis = epochMillis)
     }
 
+    /** Updates the free-text summary the user can paste from the consult. */
     fun updateSummary(value: String) {
         _state.value = _state.value.copy(summary = value)
     }
@@ -165,6 +168,7 @@ class DoctorVisitEditorViewModel(
         )
     }
 
+    /** Appends a fresh diagnosis row with a monotonic row key. */
     fun addDiagnosis() {
         val current = _state.value
         _state.value = current.copy(
@@ -172,6 +176,7 @@ class DoctorVisitEditorViewModel(
         )
     }
 
+    /** Drops the diagnosis row identified by [rowKey] from the in-memory list. */
     fun removeDiagnosis(rowKey: Long) {
         val current = _state.value
         _state.value = current.copy(
@@ -179,10 +184,12 @@ class DoctorVisitEditorViewModel(
         )
     }
 
+    /** Updates the label field on a specific diagnosis row. */
     fun updateDiagnosisLabel(rowKey: Long, value: String) {
         mutateDiagnosis(rowKey) { it.copy(label = value) }
     }
 
+    /** Updates the doctor's-notes field on a specific diagnosis row. */
     fun updateDiagnosisNotes(rowKey: Long, value: String) {
         mutateDiagnosis(rowKey) { it.copy(notes = value) }
     }
@@ -214,6 +221,14 @@ class DoctorVisitEditorViewModel(
         )
     }
 
+    /**
+     * Persists the current draft as a [DoctorVisitDraft] via the
+     * repository. Guarded by [DoctorVisitEditorUiState.canSave] (doctor
+     * name + every diagnosis label non-blank) and the in-flight `saving`
+     * flag so a rapid double-tap can't race two writes against the same
+     * row. On success the screen pops via the `saved` flag observed by
+     * the host composable.
+     */
     fun save() {
         val current = _state.value
         if (!current.canSave || current.saving) return

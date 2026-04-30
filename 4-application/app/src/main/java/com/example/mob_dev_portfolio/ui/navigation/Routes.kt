@@ -10,6 +10,13 @@ import androidx.compose.ui.graphics.vector.ImageVector
 import com.example.mob_dev_portfolio.R
 import kotlinx.serialization.Serializable
 
+/**
+ * Closed set of top-level destinations that appear in the bottom-bar /
+ * nav-rail. Modelled as a sealed interface so the navigation layer's
+ * `when` blocks are exhaustive — adding a new top-level tab forces the
+ * `selected` matcher in [com.example.mob_dev_portfolio.ui.AuraApp] to be
+ * updated rather than silently falling through.
+ */
 sealed interface TopLevelRoute {
     @Serializable
     data object Home : TopLevelRoute
@@ -29,9 +36,18 @@ sealed interface TopLevelRoute {
     data object Doctor : TopLevelRoute
 }
 
+/**
+ * Route to the read-only symptom-log detail view. Carries the Room rowId
+ * so navigation deep-links and notification taps share the same wiring.
+ */
 @Serializable
 data class DetailRoute(val id: Long)
 
+/**
+ * Route to the symptom-log edit form. A separate route from
+ * [LogSymptomRoute] (the create form) so the back-stack lands the user on
+ * the detail view rather than the list when they finish editing.
+ */
 @Serializable
 data class EditLogRoute(val id: Long)
 

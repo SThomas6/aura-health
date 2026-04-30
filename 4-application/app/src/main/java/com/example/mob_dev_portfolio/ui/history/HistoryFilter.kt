@@ -2,6 +2,21 @@ package com.example.mob_dev_portfolio.ui.history
 
 import com.example.mob_dev_portfolio.ui.log.LogValidator
 
+/**
+ * Sort orderings exposed in the History filter sheet.
+ *
+ * The display [label] for each entry is intentionally verbose ("Newest
+ * first (most recently ended)") so the user understands that the
+ * "newest" anchor is the END date rather than the start. This matters
+ * because a multi-day symptom can start days before it actually ends —
+ * users who are reviewing what's been happening recently want the most
+ * recently CONCLUDED entries surfaced first.
+ *
+ * Persisted by name via [fromName] / [name] through
+ * `UiPreferencesRepository`, so adding a new entry requires no migration
+ * — but renaming an existing entry would silently invalidate stored
+ * preferences and fall back to [Default].
+ */
 enum class HistorySort {
     DateDesc,
     DateAsc,
@@ -32,6 +47,20 @@ enum class HistorySort {
     }
 }
 
+/**
+ * Immutable snapshot of the user's current History filter selection.
+ *
+ * Modelled as a single value so it can flow as one [StateFlow] emission
+ * (rather than orchestrating five separate flows in the ViewModel) and be
+ * persisted atomically through `UiPreferencesRepository`. Default values
+ * deliberately match an "everything" filter so the History screen renders
+ * sensibly on first launch when no preference has been stored yet.
+ *
+ * Date bounds use epoch milliseconds (UTC) — the History screen converts
+ * them to `LocalDate` for display via the user's system zone, while the
+ * repository's SQL query treats them as raw epoch values to keep the
+ * predicate index-friendly.
+ */
 data class HistoryFilter(
     val query: String = "",
     val minSeverity: Int = LogValidator.MIN_SEVERITY,

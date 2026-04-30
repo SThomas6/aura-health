@@ -72,6 +72,19 @@ import java.util.Locale
 // change the picks taps through to this screen.
 // ──────────────────────────────────────────────────────────────────────
 
+/**
+ * Fullscreen Trends dashboard composable.
+ *
+ * Pulls every control surface (range chips, symptom picker, multi-select
+ * overlay sheet, prev/next/today nav) onto a single scrollable column so
+ * the user can see how their selections shape the chart in real time.
+ * Pairs with [TrendVisualisationViewModel] which owns the actual data
+ * layer; this composable is intentionally a thin presentation shell.
+ *
+ * The window-nav row defers to the VM's [TrendVisualisationViewModel.canStepForward]
+ * flag rather than computing it inline — that keeps the "we never scroll
+ * past now" rule single-sourced in the VM.
+ */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun TrendVisualisationScreen(

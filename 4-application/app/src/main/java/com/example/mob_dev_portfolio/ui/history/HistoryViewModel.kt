@@ -28,6 +28,14 @@ import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 
+/**
+ * UI state surfaced by [HistoryViewModel] for the History screen.
+ *
+ * [isLoaded] guards against rendering a flicker of the default filter
+ * before the persisted filter has been read on cold start — the screen
+ * uses it to suppress writing back to preferences until the first read
+ * has completed (see [HistoryViewModel.init]).
+ */
 data class HistoryUiState(
     val filter: HistoryFilter = HistoryFilter.Default,
     val isLoaded: Boolean = false,
@@ -48,6 +56,21 @@ data class ConditionGrouping(
     }
 }
 
+/**
+ * ViewModel for the History (Symptoms) screen.
+ *
+ * Exposes three StateFlows — [state], [logs] and [conditionGrouping] — so
+ * the screen can collect each independently and only re-render the part
+ * that changed. Filter persistence is handled here (rather than in the
+ * preferences layer directly) so the screen stays trivially testable: a
+ * fake [UiPreferencesRepository] is enough to assert the round-trip.
+ *
+ * `flatMapLatest` on the filter ensures that when a user types quickly,
+ * the in-flight Room query for the previous filter is cancelled before
+ * the new one starts — we don't surface stale results to the user. Filter
+ * writes are debounced by [PERSIST_DEBOUNCE_MILLIS] so dragging the
+ * severity slider doesn't hammer DataStore with intermediate values.
+ */
 @OptIn(ExperimentalCoroutinesApi::class, FlowPreview::class)
 class HistoryViewModel(
     private val repository: SymptomLogRepository,

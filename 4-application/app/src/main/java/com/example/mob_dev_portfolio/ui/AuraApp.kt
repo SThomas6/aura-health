@@ -63,6 +63,28 @@ import com.example.mob_dev_portfolio.ui.report.ReportHistoryScreen
 import com.example.mob_dev_portfolio.ui.settings.SettingsScreen
 import com.example.mob_dev_portfolio.ui.trends.TrendVisualisationScreen
 
+/**
+ * Top-level app composable that wires the `NavigationSuiteScaffold` (adaptive
+ * bottom-bar / nav-rail / nav-drawer depending on window size class) to the
+ * type-safe `NavHost` graph.
+ *
+ * Three responsibilities live here:
+ *  1. Hosting the [androidx.navigation.compose.NavHost] for every screen the
+ *     user can reach. Routes are declared as `@Serializable` data
+ *     classes/objects (see [com.example.mob_dev_portfolio.ui.navigation]) so
+ *     destination args are checked at compile time.
+ *  2. Computing per-tab "selected" state. A nested destination should still
+ *     keep its parent tab highlighted (e.g. the symptom-detail screen lives
+ *     under the Symptoms tab) — the [hierarchy] check below covers every
+ *     route that should adopt each tab as its visual home.
+ *  3. Reacting to one-shot deep-link events from `MainActivity` (notification
+ *     taps + Health Connect rationale intent) by reading the latest target
+ *     out of [DeepLinkEvents] and routing to the appropriate destination.
+ *
+ * Navigation uses pop/save/restore-free semantics for top-level tabs so the
+ * bottom bar always lands on the tab root rather than restoring an arbitrary
+ * nested screen — the rationale is documented at [navigateToTopLevel].
+ */
 @Composable
 fun AuraApp() {
     val navController = rememberNavController()

@@ -1,5 +1,21 @@
 package com.example.mob_dev_portfolio.ui.log
 
+/**
+ * In-memory representation of the symptom-log form while the user is
+ * authoring or editing it.
+ *
+ * Distinct from `SymptomLog` (the persistence entity) because the draft
+ * carries form-only state — the unchecked "has ended" toggle, the
+ * "attach location" intent, the editor's notion of `severity` as a
+ * mid-range default — none of which belong on the database row. The
+ * ViewModel translates a validated draft into a `SymptomLog` only at
+ * save time.
+ *
+ * Environment fields ([weatherCode], [temperatureCelsius] etc.) are
+ * carried through unchanged when editing an existing log so the original
+ * "weather at the time of the symptom" snapshot is never overwritten by
+ * a re-fetch — see [com.example.mob_dev_portfolio.ui.log.LogSymptomViewModel].
+ */
 data class LogDraft(
     val symptomName: String = "",
     val description: String = "",
@@ -39,8 +55,19 @@ data class LogDraft(
     val airQualityIndex: Int? = null,
 )
 
+/**
+ * Identifies a single field on the log form. Used as the key for
+ * per-field validation errors so the screen can place a message exactly
+ * next to the offending control rather than dumping a generic banner.
+ */
 enum class LogField { SymptomName, Description, StartDateTime, EndDateTime, Severity }
 
+/**
+ * Outcome of running [LogValidator.validate] against a [LogDraft].
+ * [errors] is empty on success; otherwise it maps each problematic field
+ * to a user-readable string. [summary] is used by accessibility
+ * announcements and by the offline test harness.
+ */
 data class LogValidationResult(
     val errors: Map<LogField, String>,
 ) {
@@ -49,12 +76,26 @@ data class LogValidationResult(
     fun summary(): String = errors.values.joinToString(separator = "\n") { "• $it" }
 }
 
+/**
+ * Pure validation rules for [LogDraft]. Lives outside the ViewModel so it
+ * can be exercised directly from unit tests without spinning up Compose
+ * or coroutines.
+ *
+ * The 60-second future-skew tolerance ([MAX_FUTURE_SKEW_MILLIS]) absorbs
+ * the small drift between the user's clock and the device's epoch — the
+ * "now" timestamp captured when the picker opens may already be slightly
+ * stale by the time the user taps Save.
+ */
 object LogValidator {
 
     const val MIN_SEVERITY = 1
     const val MAX_SEVERITY = 10
     private const val MAX_FUTURE_SKEW_MILLIS: Long = 60_000L
 
+    /**
+     * Validate the draft. `now` is injectable so tests can pin time and
+     * exercise the future-skew rule deterministically.
+     */
     fun validate(
         draft: LogDraft,
         now: Long = System.currentTimeMillis(),

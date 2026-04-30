@@ -52,6 +52,13 @@ class DoctorVisitDetailViewModel(
         initialValue = DoctorVisitDetailUiState(),
     )
 
+    /**
+     * Cascading delete of the visit. Issues the DB write on viewModelScope
+     * and then invokes [onDone] (typically a back-pop) only after the row
+     * disappears — that ordering keeps the UI on the detail screen until
+     * the cascade has un-cleared linked logs and removed diagnoses, so
+     * the user doesn't briefly see a "not found" flash.
+     */
     fun delete(onDone: () -> Unit) {
         viewModelScope.launch {
             repository.deleteVisit(visitId)
