@@ -206,8 +206,14 @@ private fun GreetingRow() {
         // with the avatars elsewhere in the app; contentDescription is
         // null because the "Aura Health" text immediately to the right
         // already names the brand for screen readers.
+        //
+        // Reference the foreground PNG layer specifically rather than
+        // R.mipmap.ic_launcher: that latter id resolves to the
+        // mipmap-anydpi adaptive-icon XML, which Compose's
+        // painterResource() can't render (it only supports vectors and
+        // raster assets). The foreground PNG is the same artwork.
         Image(
-            painter = painterResource(R.mipmap.ic_launcher),
+            painter = painterResource(R.mipmap.ic_launcher_foreground),
             contentDescription = null,
             modifier = Modifier
                 .size(40.dp)

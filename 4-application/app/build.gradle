@@ -56,12 +56,6 @@ android {
         // proforma to match the Pixel 3a marker emulator. Bumping to
         // the latest API would invalidate the test rig.
         disable += 'OldTargetApi'
-        // IconLauncherShape: the placeholder ic_launcher.png ships as
-        // a full-bleed square. Replacing it with an adaptive icon
-        // (foreground + background layers with safe-zone padding) is
-        // a graphics-design task outside this submission's scope.
-        // The app installs and runs fine on every launcher tested.
-        disable += 'IconLauncherShape'
         // GradleDependency: several artefacts (core-ktx, activity,
         // lifecycle, navigation-compose, health-connect) are
         // intentionally held back from their latest versions because

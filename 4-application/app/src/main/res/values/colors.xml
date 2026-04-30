@@ -16,4 +16,12 @@
     -->
     <color name="aura_brand_teal">#0F6E6E</color>
     <color name="aura_brand_teal_dark">#0A4A4A</color>
+
+    <!--
+        Adaptive-launcher-icon background. Sampled directly from the
+        teal disc in the source artwork (auraHealthIcon.png) so the
+        launcher's masked rendering blends seamlessly with the
+        foreground PNG even when the OS clips to a different shape.
+    -->
+    <color name="ic_launcher_background">#116B6C</color>
 </resources>
