@@ -6,7 +6,6 @@ import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.ExposedDropdownMenuAnchorType
 import androidx.compose.material3.ExposedDropdownMenuBox
 import androidx.compose.material3.ExposedDropdownMenuDefaults
-import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
@@ -95,13 +94,16 @@ sealed interface LogGrouping {
 }
 
 /**
- * Single dropdown that reads from the merged [LogGrouping] list.
+ * Single flat dropdown that reads from the merged [LogGrouping] list.
  *
- * Renders one section per origin (Conditions, then Diagnoses), each
- * with a sub-header, separated by a divider — close enough to "one
- * picker" for the user to forget the data lives in two tables, but
- * preserving enough visual cue that someone scanning the list still
- * sees which entries are doctor-verified.
+ * Originally this picker had two sub-sections ("Conditions" and
+ * "Doctor diagnoses") with sub-headers, on the theory that surfacing
+ * provenance helps the user. In practice the user wanted one true
+ * field — diagnoses and conditions belong to the same mental concept
+ * ("which standing health thing does this log relate to?") and the
+ * sub-headers re-introduced the very split the merge was supposed to
+ * remove. So we render a single flat list. Conditions first, then
+ * diagnoses (the order [LogGrouping.build] produces).
  */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -114,9 +116,6 @@ internal fun GroupingPicker(
     val selectedLabel = remember(selectedId, groupings) {
         groupings.firstOrNull { it.id == selectedId }?.displayName
     }
-
-    val conditions = groupings.filterIsInstance<LogGrouping.Condition>()
-    val diagnoses = groupings.filterIsInstance<LogGrouping.Diagnosis>()
 
     ExposedDropdownMenuBox(
         expanded = expanded,
@@ -145,66 +144,16 @@ internal fun GroupingPicker(
                 },
                 modifier = Modifier.testTag("grouping_option_none"),
             )
-
-            // Conditions section — the user-declared, standing facts.
-            // Rendered first because it's where the average user is
-            // likeliest to find a match (every onboarded user has at
-            // least one).
-            if (conditions.isNotEmpty()) {
-                HorizontalDivider()
-                SectionLabelItem(label = "Conditions")
-                conditions.forEach { item ->
-                    DropdownMenuItem(
-                        text = { Text(item.displayName) },
-                        onClick = {
-                            expanded = false
-                            onSelect(item.id)
-                        },
-                        modifier = Modifier.testTag("grouping_option_${item.id}"),
-                    )
-                }
-            }
-
-            // Diagnoses section — doctor-confirmed, scoped to a visit.
-            // Sub-headed separately so the user still sees that these
-            // entries carry stronger provenance than self-declared
-            // conditions.
-            if (diagnoses.isNotEmpty()) {
-                HorizontalDivider()
-                SectionLabelItem(label = "Doctor diagnoses")
-                diagnoses.forEach { item ->
-                    DropdownMenuItem(
-                        text = { Text(item.displayName) },
-                        onClick = {
-                            expanded = false
-                            onSelect(item.id)
-                        },
-                        modifier = Modifier.testTag("grouping_option_${item.id}"),
-                    )
-                }
+            groupings.forEach { item ->
+                DropdownMenuItem(
+                    text = { Text(item.displayName) },
+                    onClick = {
+                        expanded = false
+                        onSelect(item.id)
+                    },
+                    modifier = Modifier.testTag("grouping_option_${item.id}"),
+                )
             }
         }
     }
-}
-
-/**
- * Disabled, label-styled dropdown row used as a section sub-header
- * inside [GroupingPicker]. Compose's M3 dropdown doesn't ship a
- * dedicated header item, so we render a plain disabled menu item —
- * keyboard / accessibility tree treats it as non-interactive without
- * pulling in extra widget machinery.
- */
-@Composable
-private fun SectionLabelItem(label: String) {
-    DropdownMenuItem(
-        text = {
-            Text(
-                text = label.uppercase(),
-                style = androidx.compose.material3.MaterialTheme.typography.labelSmall,
-                color = androidx.compose.material3.MaterialTheme.colorScheme.onSurfaceVariant,
-            )
-        },
-        onClick = {},
-        enabled = false,
-    )
 }

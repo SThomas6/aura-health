@@ -50,9 +50,16 @@ class BootCompletedReceiver : BroadcastReceiver() {
         // unlocks for the first time after boot. Attempting any DB
         // work before that will fail noisily. Defer to the follow-up
         // BOOT_COMPLETED broadcast, which fires post-unlock.
+        //
+        // We resolve UserManager defensively: if the cast or the
+        // service lookup ever returned null (it shouldn't on our
+        // minSdk, but the API is `Object`-typed and we don't trust
+        // OEM ROMs), we'd rather skip the rearm than risk the silent
+        // pre-unlock failure mode this guard exists to prevent. The
+        // follow-up BOOT_COMPLETED will retry once the user unlocks.
         val userManager = context.getSystemService(Context.USER_SERVICE) as? UserManager
-        if (userManager?.isUserUnlocked == false) {
-            Log.i(TAG, "Skipping rearm on $action — user not unlocked yet")
+        if (userManager == null || !userManager.isUserUnlocked) {
+            Log.i(TAG, "Skipping rearm on $action — user not unlocked yet (userManager=${userManager != null})")
             return
         }
 

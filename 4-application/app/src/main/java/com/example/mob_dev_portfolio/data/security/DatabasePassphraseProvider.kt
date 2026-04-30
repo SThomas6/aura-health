@@ -162,12 +162,21 @@ object DatabasePassphraseProvider {
             }
 
             val fresh = generatePassphrase()
-            cached = fresh
             val (iv, ciphertext) = encryptWithKeystore(fresh)
             store.edit { editor ->
                 editor[WRAPPED_PASSPHRASE] = Base64.encodeToString(ciphertext, Base64.NO_WRAP)
                 editor[WRAPPED_IV] = Base64.encodeToString(iv, Base64.NO_WRAP)
             }
+            // Publish to the in-memory cache only AFTER persistence
+            // succeeds. If `encryptWithKeystore` or `store.edit` throws,
+            // the mutex unwinds without a stale cache, the lazy DB
+            // getter retries cleanly, and the next cold start sees no
+            // wrapped key in DataStore — matching reality. Pre-fix the
+            // order was `cached = fresh` first, which on a transient
+            // Keystore failure would let the in-flight process keep
+            // using `fresh` while the next cold start regenerated and
+            // quarantined the encrypted DB → silent data loss.
+            cached = fresh
             val outcome = if (hadWrappedKey) {
                 PassphraseOutcome.GeneratedAfterCorruption
             } else {
